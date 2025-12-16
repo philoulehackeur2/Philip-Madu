@@ -1,5 +1,6 @@
+
 import { GoogleGenAI, Type, Content, Part } from "@google/genai";
-import { ImageResolution, AspectRatio, UploadedFile, BrandArchetype, MarketingStrategy, TechPack, ImageMode, EnvironmentPreset, LightingPreset, FramingPreset, SourceInterpretation, ModelPreset, CollectionLook, PatternMetric } from "../types";
+import { ImageResolution, AspectRatio, UploadedFile, BrandArchetype, MarketingStrategy, TechPack, ImageMode, EnvironmentPreset, LightingPreset, FramingPreset, SourceInterpretation, ModelPreset, CollectionLook, PatternMetric, GenerationParams } from "../types";
 import { constructEvolutionaryPrompt as _constructEvolutionaryPrompt } from './mutationEngine';
 import { generateMarketingStrategy as _generateMarketingStrategy, groundPromptWithSearch as _groundPromptWithSearch, BRAND_CONTEXT } from './strategicIntelligence';
 
@@ -125,8 +126,6 @@ const getClient = () => {
 };
 
 // --- UTILS: BLOB URL MANAGEMENT ---
-// Reduces memory pressure by using Blob URLs instead of Base64 strings.
-
 const base64ToBlobUrl = (base64Data: string, mimeType: string = 'image/png'): string => {
   const byteCharacters = atob(base64Data);
   const byteNumbers = new Array(byteCharacters.length);
@@ -138,25 +137,85 @@ const base64ToBlobUrl = (base64Data: string, mimeType: string = 'image/png'): st
   return URL.createObjectURL(blob);
 };
 
+// Robust Base64 extraction with fallback for CORS/Auth issues
 const getBase64FromUrl = async (url: string): Promise<{ base64: string, mimeType: string }> => {
+  if (!url) throw new Error("URL is empty");
+
+  // 1. Data URL
   if (url.startsWith('data:')) {
     const base64 = url.split(',')[1];
     const mimeType = url.substring(url.indexOf(':') + 1, url.indexOf(';'));
     return { base64, mimeType };
   }
-  // Assume Blob URL or Remote URL
-  const response = await fetch(url);
-  const blob = await response.blob();
-  const reader = new FileReader();
-  return new Promise((resolve, reject) => {
-    reader.onloadend = () => {
-      const res = reader.result as string;
-      const base64 = res.split(',')[1];
-      resolve({ base64, mimeType: blob.type });
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
+
+  // 2. Blob URL (Local) - Safe to fetch without explicit CORS settings usually
+  if (url.startsWith('blob:')) {
+     try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Blob fetch failed');
+        const blob = await response.blob();
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                if (typeof reader.result === 'string') {
+                    resolve({ base64: reader.result.split(',')[1], mimeType: blob.type });
+                } else {
+                    reject(new Error("Failed to read blob"));
+                }
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+     } catch (e) {
+         console.warn("Blob fetch failed, falling back to image method", e);
+         // Fallthrough
+     }
+  }
+
+  // 3. Remote URL - Try Fetch with CORS mode, fallback to Image
+  try {
+    const response = await fetch(url, { mode: 'cors', credentials: 'omit' });
+    if (!response.ok) throw new Error(`Fetch failed with status: ${response.status}`);
+    const blob = await response.blob();
+    
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const res = reader.result as string;
+        const base64 = res.split(',')[1];
+        resolve({ base64, mimeType: blob.type });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch (error: any) {
+    console.warn("Standard fetch failed, attempting Image fallback for CORS/Cache:", error);
+    
+    // 4. Fallback: HTMLImageElement (Handles some cross-origin/cache cases better)
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "Anonymous"; 
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            if(!ctx) { reject(new Error("Canvas context failed")); return; }
+            try {
+                ctx.drawImage(img, 0, 0);
+                const dataUrl = canvas.toDataURL("image/png");
+                resolve({
+                    base64: dataUrl.split(',')[1],
+                    mimeType: 'image/png'
+                });
+            } catch (e) {
+                reject(new Error("Image loaded but Canvas tainted. CORS restricted image."));
+            }
+        };
+        img.onerror = () => reject(new Error(`Failed to load image resource (CORS/Network).`));
+        img.src = url;
+    });
+  }
 };
 
 export const checkApiKey = async (): Promise<boolean> => {
@@ -228,7 +287,7 @@ export const enhancePrompt = async (originalPrompt: string, brand: BrandArchetyp
     });
 
     if (response.text) {
-      return JSON.parse(response.text);
+        return JSON.parse(response.text);
     }
     throw new Error("Empty response");
   } catch (e) {
@@ -236,33 +295,6 @@ export const enhancePrompt = async (originalPrompt: string, brand: BrandArchetyp
     return { improvedPrompt: originalPrompt, suggestedScene: { environment: "Random", lighting: "Random", framing: "Full Body" } };
   }
 };
-
-interface GenerateParams {
-  prompt: string;
-  uploadedFiles: UploadedFile[];
-  resolution: ImageResolution;
-  aspectRatio: AspectRatio;
-  brand: BrandArchetype;
-  isMarketingMockup?: boolean;
-  logoBase64?: string;
-  locationQuery?: string;
-  logoStyle?: string;
-  colorPalette?: string;
-  modelPrompt?: string;
-  imageMode?: ImageMode;
-  learningContext?: string[];
-  environment: string; 
-  lighting: string;    
-  framing: string;     
-  sourceInterpretation?: SourceInterpretation;
-  sourceMaterialPrompt?: string;
-  customScenePrompt?: string;
-  seed: number;
-  iterationMode?: 'EVOLVE' | 'MUTATE' | 'BREAK' | 'NONE';
-  referenceImageId?: string;
-  customHexColors?: string[];
-  sourceFidelity?: number; 
-}
 
 export const generateEditorialImages = async ({
   prompt,
@@ -285,8 +317,10 @@ export const generateEditorialImages = async ({
   customScenePrompt,
   iterationMode = 'NONE',
   customHexColors,
-  sourceFidelity = 30 
-}: GenerateParams): Promise<string[]> => {
+  sourceFidelity = 30,
+  imageMode = ImageMode.CINEMATIC,
+  referenceModelUrl
+}: GenerationParams): Promise<string[]> => {
   const ai = getClient();
   const brandInfo = BRAND_CONTEXT[brand];
   const isDeRoche = brand === BrandArchetype.DE_ROCHE;
@@ -330,6 +364,21 @@ export const generateEditorialImages = async ({
     parts.push({ inlineData: { mimeType: 'image/png', data: logoBase64 } });
   }
 
+  // --- REFERENCE MODEL LOGIC (UPDATED & SAFEGUARDED) ---
+  if (referenceModelUrl) {
+      try {
+          const { base64, mimeType } = await getBase64FromUrl(referenceModelUrl);
+          parts.push({ inlineData: { mimeType, data: base64 } });
+          parts.push({
+             text: "CRITICAL INSTRUCTION: Use the image provided above as the CHARACTER REFERENCE. Maintain the exact facial features, skin tone, and body type of this person. Only change the clothing and environment based on the description below."
+          });
+      } catch (e) {
+          console.warn("Failed to load reference model image - proceeding without it.", e);
+          // We intentionally do NOT throw here, allowing the generation to proceed with a random model
+          // instead of breaking the entire app flow.
+      }
+  }
+
   const variedPrompt = injectSynonyms(prompt);
   const locationContext = locationQuery ? `WORLD: "${locationQuery}". FILTER THROUGH: ${environment}.` : `WORLD: ${envDesc}. TEXTURE: ${randomTexture}.`;
   
@@ -338,23 +387,37 @@ export const generateEditorialImages = async ({
 
   const chaosFactor = Math.random() > 0.4 ? `CONCEPTUAL FILTER: ${bizarrePairing}` : "";
 
+  // LOOKBOOK LOGIC OVERRIDE
+  const isLookbook = imageMode === ImageMode.LOOKBOOK;
+  
+  let finalEnv = envDesc;
+  let finalLight = lightDesc;
+
+  if (isLookbook) {
+      if (environment === EnvironmentPreset.RANDOM) finalEnv = ENVIRONMENT_DESCRIPTIONS[EnvironmentPreset.NEUTRAL_STUDIO];
+      if (lighting === LightingPreset.RANDOM) finalLight = LIGHTING_DESCRIPTIONS[LightingPreset.SOFT_DIFFUSE];
+      // Append clarity instruction
+      finalEnv += " Clean, minimal, non-distracting background.";
+      finalLight += " Even, bright, commercial lighting.";
+  }
+
   const refinedPrompt = `
-    [PHOTOGRAPHIC DIRECTIVE]: Create a hyper-realistic ${isMarketingMockup ? 'marketing campaign' : 'editorial fashion'} photograph.
+    [PHOTOGRAPHIC DIRECTIVE]: Create a ${isLookbook ? 'clean, high-definition FASHION LOOKBOOK' : `hyper-realistic ${isMarketingMockup ? 'marketing campaign' : 'editorial fashion'}`} photograph.
     
-    [SETTING] ${envDesc}. Texture: ${randomTexture}. Atmosphere: ${bizarrePairing}. ${customScenePrompt || ''}
-    [LIGHTING] ${lightDesc}. Tone: ${sentiment.toUpperCase()}. ${chaosFactor}.
+    [SETTING] ${finalEnv}. ${!isLookbook ? `Texture: ${randomTexture}. Atmosphere: ${bizarrePairing}.` : ''} ${customScenePrompt || ''}
+    [LIGHTING] ${finalLight}. ${!isLookbook ? `Tone: ${sentiment.toUpperCase()}. ${chaosFactor}` : ''}.
     [SUBJECT] ${finalModelDescription}
     [FASHION] Concept: ${variedPrompt}. Brand: ${brandInfo.name}. ${colorContext}.
-    [TECH] Phase One IQ4 150MP. Kodak Portra 400.
+    [TECH] ${isLookbook ? 'Phase One IQ4 150MP. Aperture f/8. Sharp focus on garment details.' : 'Phase One IQ4 150MP. Kodak Portra 400.'}
     ${referenceAnchorText}
     ${iterationInstruction}
     ${learningInstruction}
     
     *** VISUAL MANDATE ***
-    - PHOTOGRAPHY: Raw 150MP output.
+    - PHOTOGRAPHY: Raw 150MP output. ${isLookbook ? 'Commercial clarity.' : ''}
     - SKIN: EXTREME REALISM. Visible pores, vellus hair, sweat. NO AI SMOOTHING.
-    - IMPERFECTIONS: Chromatic aberration, film grain.
-    - LIGHTING: Inverse square law fallout.
+    - IMPERFECTIONS: ${isLookbook ? 'None. Perfect clarity.' : 'Chromatic aberration, film grain.'}
+    ${isLookbook ? '- POSE: Standing, full view of outfit.' : '- LIGHTING: Inverse square law fallout.'}
   `;
 
   parts.push({ text: refinedPrompt });

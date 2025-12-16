@@ -1,13 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Zap, Globe, Loader2, Wand2 } from 'lucide-react';
 import { BrandArchetype } from '../types';
-import { useAppStore } from '../store';
 
 interface PromptInputProps {
   onGenerate: (prompt: string) => void;
   onEnhance: (currentPrompt: string) => Promise<string>;
   onInspire: () => Promise<string>;
-  overridePrompt?: string; 
+  overridePrompt?: string; // Prop to force update the internal state
+  isGenerating: boolean;
+  loadingStep: string;
+  isEnhancing: boolean;
+  isGettingInspiration: boolean;
+  useGrounding: boolean;
+  setUseGrounding: (val: boolean) => void;
+  brand: BrandArchetype;
 }
 
 export const PromptInput: React.FC<PromptInputProps> = ({
@@ -15,20 +21,17 @@ export const PromptInput: React.FC<PromptInputProps> = ({
   onEnhance,
   onInspire,
   overridePrompt,
+  isGenerating,
+  loadingStep,
+  isEnhancing,
+  isGettingInspiration,
+  useGrounding,
+  setUseGrounding,
+  brand
 }) => {
-  // Access global state via Zustand
-  const { 
-    brand, 
-    isGenerating, 
-    loadingStep, 
-    useGrounding, 
-    setUseGrounding 
-  } = useAppStore();
-
   const [localPrompt, setLocalPrompt] = useState('');
-  const [isEnhancing, setIsEnhancing] = useState(false);
-  const [isGettingInspiration, setIsGettingInspiration] = useState(false);
 
+  // Sync with parent when overridePrompt changes (e.g. from Inspire or Enhance or external setter)
   useEffect(() => {
     if (overridePrompt !== undefined) {
       setLocalPrompt(overridePrompt);
@@ -37,26 +40,20 @@ export const PromptInput: React.FC<PromptInputProps> = ({
 
   const handleEnhanceClick = async () => {
     if (!localPrompt) return;
-    setIsEnhancing(true);
     try {
       const enhanced = await onEnhance(localPrompt);
       if (enhanced) setLocalPrompt(enhanced);
     } catch (e) {
       console.error(e);
-    } finally {
-        setIsEnhancing(false);
     }
   };
 
   const handleInspireClick = async () => {
-    setIsGettingInspiration(true);
     try {
       const inspired = await onInspire();
       if (inspired) setLocalPrompt(inspired);
     } catch (e) {
       console.error(e);
-    } finally {
-        setIsGettingInspiration(false);
     }
   };
 

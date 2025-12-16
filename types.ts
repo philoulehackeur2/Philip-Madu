@@ -1,5 +1,4 @@
 
-
 export enum ImageResolution {
   RES_1K = '1K',
   RES_2K = '2K',
@@ -234,4 +233,42 @@ export interface DesignParameters {
   fitTension: number; // 0-100 (Ease)
   gravity: number;    // 0-100 (Drape)
   distortion: number; // 0-100 (Chaos/Shift)
+}
+
+// --- MODEL STORAGE TYPES ---
+export interface SavedModel {
+  id: string;
+  url: string; // Firebase Storage URL
+  type: 'UPLOADED' | 'GENERATED';
+  name?: string; // Optional nickname e.g., "Sasha"
+  timestamp: number;
+}
+
+// --- GENERATION TYPES ---
+export interface GenerationParams {
+  prompt: string;
+  uploadedFiles: UploadedFile[];
+  resolution: ImageResolution;
+  aspectRatio: AspectRatio;
+  brand: BrandArchetype;
+  isMarketingMockup?: boolean;
+  logoBase64?: string;
+  locationQuery?: string;
+  logoStyle?: string;
+  colorPalette?: string;
+  modelPrompt?: string;
+  imageMode?: ImageMode;
+  learningContext?: string[];
+  environment: string; 
+  lighting: string;    
+  framing: string;     
+  sourceInterpretation?: SourceInterpretation;
+  sourceMaterialPrompt?: string;
+  customScenePrompt?: string;
+  seed: number;
+  iterationMode?: 'EVOLVE' | 'MUTATE' | 'BREAK' | 'NONE';
+  referenceImageId?: string;
+  customHexColors?: string[];
+  sourceFidelity?: number; 
+  referenceModelUrl?: string; // For consistent model generation
 }

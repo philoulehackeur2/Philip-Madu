@@ -1,16 +1,15 @@
 
-import React, { useState, memo } from 'react';
+import React, { useState } from 'react';
 import { GeneratedImage, BrandArchetype } from '../types';
-import { Loader2, FileText, X, Wand2, PenTool, Copy, Video, Waves, GitBranch, TestTube, Edit3, Palette, Ruler, Image as ImageIcon, Maximize2 } from 'lucide-react';
+import { Loader2, Sparkles, FileText, X, Wand2, PenTool, Copy, Video, Waves, GitBranch, Zap, Split, TestTube, Edit3, Palette, Ruler, Image as ImageIcon, Maximize2 } from 'lucide-react';
 import { generateConceptSketch, modifyGarmentFabric } from '../services/geminiService';
 import { PatternCutter } from './PatternCutter';
-import { useAppStore } from '../store';
 
 interface RightSidebarProps {
+  selectedImage: GeneratedImage | null;
   onClose: () => void;
-  // Specific callbacks still passed as they invoke services in App.tsx
-  // We could move these to store actions but that requires moving service logic to store.
-  // For now, we removed the state props (brand, selectedImage)
+  onUpdateImage: (id: string, newUrl: string) => void;
+  onAddSketch: (originalImage: GeneratedImage, sketchUrl: string) => void;
   onEditStart: (id: string, prompt: string) => Promise<string>;
   onGenerateTechPack: (image: GeneratedImage) => void;
   isGeneratingTechPack: boolean;
@@ -26,8 +25,11 @@ interface RightSidebarProps {
   onOpenStudio: () => void;
 }
 
-export const RightSidebar = memo<RightSidebarProps>(({
+export const RightSidebar = React.memo<RightSidebarProps>(({
+  selectedImage,
   onClose,
+  onUpdateImage,
+  onAddSketch,
   onEditStart,
   onGenerateTechPack,
   isGeneratingTechPack,
@@ -42,17 +44,6 @@ export const RightSidebar = memo<RightSidebarProps>(({
   isGeneratingStrategy,
   onOpenStudio
 }) => {
-  // CONSUME STORE
-  const { 
-      brand, 
-      selectedImageId, 
-      generatedImages, 
-      updateGeneratedImage, 
-      addGeneratedImage 
-  } = useAppStore();
-
-  const selectedImage = generatedImages.find(i => i.id === selectedImageId) || null;
-
   const [activeTab, setActiveTab] = useState<'ATELIER' | 'CONSTRUCTION'>('ATELIER');
   const [showPatternCutter, setShowPatternCutter] = useState(false);
   
@@ -86,8 +77,7 @@ export const RightSidebar = memo<RightSidebarProps>(({
     setIsEditing(true);
     try {
       const newUrl = await onEditStart(selectedImage.id, editPrompt);
-      // UPDATE VIA STORE ACTION
-      updateGeneratedImage(selectedImage.id, { url: newUrl });
+      onUpdateImage(selectedImage.id, newUrl);
       setEditPrompt('');
     } catch (e: any) {
       if (e.name !== 'AbortError') {
@@ -104,7 +94,7 @@ export const RightSidebar = memo<RightSidebarProps>(({
      try {
        // Apply color grading via edit
        const newUrl = await onEditStart(selectedImage.id, `Apply a subtle ${hexColor} color grade and tint to the entire image. Maintain cinematic lighting.`);
-       updateGeneratedImage(selectedImage.id, { url: newUrl });
+       onUpdateImage(selectedImage.id, newUrl);
      } catch (e: any) {
        if (e.name !== 'AbortError') {
           alert("Color grading failed");
@@ -118,15 +108,7 @@ export const RightSidebar = memo<RightSidebarProps>(({
     setIsSketching(true);
     try {
       const sketchUrl = await generateConceptSketch(selectedImage.url, selectedImage.brand);
-      // ADD VIA STORE ACTION
-      const sketchImage: GeneratedImage = {
-        ...selectedImage, 
-        id: Math.random().toString(36).substring(2, 15), // Basic ID gen for now, or import util
-        url: sketchUrl, 
-        prompt: `Technical Sketch of ${selectedImage.prompt}`, 
-        type: 'editorial'
-     };
-     addGeneratedImage(sketchImage);
+      onAddSketch(selectedImage, sketchUrl);
     } catch (e: any) {
       if (e.name !== 'AbortError') {
          alert("Sketch generation failed");
@@ -142,7 +124,7 @@ export const RightSidebar = memo<RightSidebarProps>(({
     try {
         const fullFabricDesc = `${fabricPrompt}, ${fabricWeight} weight, ${fabricStructure} structure`;
         const newUrl = await modifyGarmentFabric(selectedImage.url, fullFabricDesc, fabricStructure, fabricWeight);
-        updateGeneratedImage(selectedImage.id, { url: newUrl });
+        onUpdateImage(selectedImage.id, newUrl);
     } catch(e: any) {
         if (e.name !== 'AbortError') {
            alert("Fabric modification failed");
@@ -170,6 +152,7 @@ export const RightSidebar = memo<RightSidebarProps>(({
     {/* Full Screen Pattern Cutter Overlay */}
     {showPatternCutter && (
        <PatternCutter 
+          brand={selectedImage.brand} 
           lookData={selectedImage.lookData}
           onClose={() => setShowPatternCutter(false)} 
        />

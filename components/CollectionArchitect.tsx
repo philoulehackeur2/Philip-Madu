@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, memo } from 'react';
+import React, { useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Tldraw, 
@@ -20,9 +20,11 @@ import {
   DropAnimation,
   pointerWithin
 } from '@dnd-kit/core';
-import { Layers, SplitSquareHorizontal, X } from 'lucide-react';
+import { Layers, SplitSquareHorizontal, Wand2, RefreshCw, X, Maximize2, Save, Loader2 } from 'lucide-react';
 import { BrandArchetype, GeneratedImage } from '../types';
 import { FashionCardUtil, ComparisonUtil } from './TldrawShapes';
+import { useAuth } from '../contexts/AuthContext';
+import { saveCollectionState } from '../services/storageService';
 
 interface CollectionArchitectProps {
   brand: BrandArchetype;
@@ -31,8 +33,36 @@ interface CollectionArchitectProps {
   onVisualizeLook: (look: any) => void;
 }
 
+// --- HELPER: SVG TO BLOB ---
+const convertSvgToPng = (svg: SVGSVGElement): Promise<Blob> => {
+  return new Promise((resolve, reject) => {
+    const svgStr = new XMLSerializer().serializeToString(svg);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return reject(new Error('No context'));
+      
+      // White background for preview consistency
+      ctx.fillStyle = '#ffffff'; 
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob(blob => {
+         if(blob) resolve(blob);
+         else reject(new Error('Blob failed'));
+      }, 'image/png');
+    };
+    img.onerror = reject;
+    // Utilize base64 encoding to prevent taint issues with external resources inside SVG if any (though Tldraw usually embeds)
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgStr)));
+  });
+};
+
 // --- SIDEBAR ITEM (DRAGGABLE) ---
-const SidebarItem = memo(({ image, isOverlay = false }: { image: GeneratedImage, isOverlay?: boolean }) => {
+const SidebarItem = React.memo(({ image, isOverlay = false }: { image: GeneratedImage, isOverlay?: boolean }) => {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `asset-${image.id}`,
     data: { 
@@ -75,10 +105,12 @@ const dropAnimation: DropAnimation = {
   }),
 };
 
-export const CollectionArchitect = memo<CollectionArchitectProps>(({ brand, images, onVisualizeLook }) => {
+export const CollectionArchitect = React.memo<CollectionArchitectProps>(({ brand, images, onVisualizeLook }) => {
+  const { user } = useAuth();
   const [editor, setEditor] = useState<Editor | null>(null);
   const [activeDragImage, setActiveDragImage] = useState<GeneratedImage | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   
   const { setNodeRef } = useDroppable({ id: 'canvas-droppable' });
   
@@ -108,7 +140,7 @@ export const CollectionArchitect = memo<CollectionArchitectProps>(({ brand, imag
       const assetData = active.data.current;
       
       if (assetData && assetData.type === 'fashion-asset') {
-         // Get the center of the viewport to drop
+         // Get the center of the viewport to drop if we can't calculate exact coord easily without mouse event
          const { x, y } = editor.getViewportScreenCenter();
          
          editor.createShape({
@@ -157,6 +189,46 @@ export const CollectionArchitect = memo<CollectionArchitectProps>(({ brand, imag
         }
       });
     });
+  };
+
+  const handleSaveCollection = async () => {
+    if (!editor || !user) return;
+    setIsSaving(true);
+
+    try {
+      // 1. Get the "Brains" (JSON Snapshot)
+      const snapshot = editor.store.getSnapshot();
+
+      // 2. Get the "Look" (Visual Preview)
+      // Tldraw 2.x API for getting SVG of all shapes on current page
+      const shapeIds = Array.from(editor.getCurrentPageShapeIds());
+      
+      if (shapeIds.length === 0) {
+         alert("Canvas is empty. Add assets before saving.");
+         setIsSaving(false);
+         return;
+      }
+
+      const svg = await editor.getSvg(shapeIds, { scale: 1, background: true });
+      if (!svg) throw new Error("Failed to generate SVG");
+      
+      const pngBlob = await convertSvgToPng(svg);
+
+      // 3. Send to Storage Service
+      await saveCollectionState(
+        user.uid,
+        `Collection ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, 
+        snapshot, 
+        pngBlob
+      );
+      
+      alert("Collection Saved to Cloud Archive!");
+    } catch (e) {
+      console.error(e);
+      alert("Save failed. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // If collapsed, show a trigger button
@@ -210,7 +282,6 @@ export const CollectionArchitect = memo<CollectionArchitectProps>(({ brand, imag
               onMount={setEditor}
               shapeUtils={customShapeUtils}
               hideUi={false}
-              persistenceKey="lumiere-architect-v3"
               className="z-0"
             >
               {/* FLOATING ACTION BAR */}
@@ -221,6 +292,18 @@ export const CollectionArchitect = memo<CollectionArchitectProps>(({ brand, imag
                  >
                    <SplitSquareHorizontal size={14} /> Compare
                  </button>
+              </div>
+
+              {/* SAVE BUTTON OVERLAY */}
+              <div className="absolute top-4 right-4 z-[100] pointer-events-auto">
+                <button 
+                  onClick={handleSaveCollection}
+                  disabled={isSaving}
+                  className="bg-black text-white px-4 py-2 rounded shadow-xl flex items-center gap-2 uppercase text-xs font-bold tracking-widest hover:bg-[#C5A059] transition-colors"
+                >
+                  {isSaving ? <Loader2 className="animate-spin" size={14}/> : <Save size={14}/>}
+                  Save Page
+                </button>
               </div>
             </Tldraw>
           </div>

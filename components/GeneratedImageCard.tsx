@@ -1,5 +1,6 @@
-import React, { useState, memo } from 'react';
-import { Download, Edit2, Check, Star, Tag } from 'lucide-react';
+
+import React, { useState } from 'react';
+import { Download, Edit2, Check, ExternalLink, Star, Tag } from 'lucide-react';
 import { GeneratedImage, BrandArchetype } from '../types';
 
 interface GeneratedImageCardProps {
@@ -9,15 +10,17 @@ interface GeneratedImageCardProps {
   onOpenSidebar: () => void;
   onRate?: (rating: number) => void;
   onAddCollection?: (collection: string) => void;
+  onDownload?: (image: GeneratedImage) => void;
 }
 
-export const GeneratedImageCard = memo<GeneratedImageCardProps>(({ 
+export const GeneratedImageCard = React.memo<GeneratedImageCardProps>(({ 
   image, 
   isSelected, 
   onToggleSelect, 
   onOpenSidebar,
   onRate,
-  onAddCollection
+  onAddCollection,
+  onDownload
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isTagging, setIsTagging] = useState(false);
@@ -25,12 +28,18 @@ export const GeneratedImageCard = memo<GeneratedImageCardProps>(({
 
   const handleDownload = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const link = document.createElement('a');
-    link.href = image.url;
-    link.download = `lumiere-editorial-${image.id}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    
+    if (onDownload) {
+      onDownload(image);
+    } else {
+      // Fallback behavior
+      const link = document.createElement('a');
+      link.href = image.url;
+      link.download = `lumiere-editorial-${image.id}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   };
 
   const handleTagSubmit = (e: React.FormEvent) => {

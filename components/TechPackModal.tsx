@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { X, FileText, Printer, Ruler, Layers, Activity, PenTool, Box, Tag, ClipboardCheck } from 'lucide-react';
 import { TechPack, GeneratedImage, BrandArchetype } from '../types';
@@ -165,7 +166,7 @@ export const TechPackModal: React.FC<TechPackModalProps> = ({ techPack, image, o
                  {activeTab === 'bom' && (
                     <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
                        <h3 className="font-bold text-lg uppercase mb-4 flex items-center gap-2"><Layers size={18} /> Bill of Materials</h3>
-                       <div className="border-2 border-black">
+                       <div className="border-2 border-black bg-white">
                           <table className="w-full text-xs text-left font-mono">
                              <thead className="bg-black text-white">
                                 <tr>
@@ -201,14 +202,14 @@ export const TechPackModal: React.FC<TechPackModalProps> = ({ techPack, image, o
                        </div>
                        
                        <div className="mt-8 flex gap-8">
-                          <div className="flex-1 border border-gray-300 p-4">
+                          <div className="flex-1 border border-gray-300 p-4 bg-white">
                              <h4 className="font-bold text-xs uppercase mb-2">Primary Fabric</h4>
                              <div className="h-24 bg-gray-100 flex items-center justify-center border border-dashed border-gray-400 text-gray-400 text-[10px]">
                                 SWATCH CARD
                              </div>
                              <p className="mt-2 text-xs font-mono">{techPack.fabricComposition}</p>
                           </div>
-                          <div className="flex-1 border border-gray-300 p-4">
+                          <div className="flex-1 border border-gray-300 p-4 bg-white">
                              <h4 className="font-bold text-xs uppercase mb-2">Trim / Labels</h4>
                              <div className="h-24 bg-gray-100 flex items-center justify-center border border-dashed border-gray-400 text-gray-400 text-[10px]">
                                 LABEL PLACEMENT
@@ -221,7 +222,7 @@ export const TechPackModal: React.FC<TechPackModalProps> = ({ techPack, image, o
                  {activeTab === 'specs' && (
                     <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
                        <h3 className="font-bold text-lg uppercase mb-4 flex items-center gap-2"><Ruler size={18} /> Graded Specs</h3>
-                       <div className="border-2 border-black">
+                       <div className="border-2 border-black bg-white">
                           <table className="w-full text-xs text-left font-mono">
                              <thead className="bg-black text-white">
                                 <tr>
@@ -245,7 +246,7 @@ export const TechPackModal: React.FC<TechPackModalProps> = ({ techPack, image, o
                        </div>
                        
                        <div className="mt-8 flex justify-end">
-                          <div className="w-64 border-2 border-black p-4">
+                          <div className="w-64 border-2 border-black p-4 bg-white">
                              <div className="flex justify-between items-center mb-4">
                                 <span className="text-xs font-bold uppercase">Tech Approval</span>
                                 <ClipboardCheck size={16} />
