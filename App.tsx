@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import { 
   Camera, Lock, Unlock, Dice5, ChevronDown, 
-  Sparkles, Zap, LayoutGrid, Users, Palette, Layers, Wand2, 
+  LayoutGrid, Users, Palette, Layers, 
   Maximize, Image as ImageIcon, Monitor, Sliders, RefreshCw,
-  X, Type, Hexagon, Globe, Loader2, Fingerprint
+  X, Type, Hexagon, Fingerprint, Filter, Loader2
 } from 'lucide-react';
 import { 
   GeneratedImage, BrandArchetype, EnvironmentPreset, 
@@ -25,14 +25,18 @@ import { UploadZone } from './components/UploadZone';
 import { GeneratedImageCard } from './components/GeneratedImageCard';
 import { RightSidebar } from './components/RightSidebar';
 import { MarketingModal } from './components/MarketingModal';
-import { TechPackModal } from './components/TechPackModal';
 import { ImageComparator } from './components/ImageComparator';
 import { NarrativeEngine } from './components/NarrativeEngine';
 import { VibeCheck } from './components/VibeCheck';
 import { ImmersiveStudio } from './components/ImmersiveStudio';
-import { CollectionArchitect } from './components/CollectionArchitect';
 import { ChatBot } from './components/ChatBot';
 import { ColorHarmonyWheel } from './components/ColorHarmonyWheel';
+import { PromptInput } from './components/PromptInput';
+import { useAppStore } from './store';
+
+// Lazy Load Heavy Components
+const TechPackModal = lazy(() => import('./components/TechPackModal').then(module => ({ default: module.TechPackModal })));
+const CollectionArchitect = lazy(() => import('./components/CollectionArchitect').then(module => ({ default: module.CollectionArchitect })));
 
 // --- CASTING CONSTANTS ---
 const CASTING_GENDERS = ["Female", "Male", "Non-Binary", "Androgynous", "Fluid", "Alien", "Unspecified"];
@@ -41,24 +45,37 @@ const CASTING_HAIR = ["Shaved", "Architectural Bob", "Wet-Look Long", "Spiked", 
 const CASTING_FACE = ["Classic", "Alien", "Severe", "Doll-like", "Pierced", "Tattooed", "Gaunt", "Freckled", "Fresh"];
 
 const App: React.FC = () => {
-  // --- STATE ---
+  // Use Store hooks
+  const { 
+    brand, 
+    setBrand, 
+    isGenerating, 
+    setIsGenerating,
+    setLoadingStep,
+    generatedImages, 
+    setGeneratedImages,
+    addGeneratedImage,
+    updateGeneratedImage,
+    uploadedFiles, 
+    setUploadedFiles,
+    addUploadedFiles,
+    removeUploadedFile,
+    selectedImageId, 
+    setSelectedImageId,
+    comparisonImageId, 
+    setComparisonImageId,
+    useGrounding
+  } = useAppStore();
+
+  // --- LOCAL STATE (Specific to Controls/Modals) ---
   const [hasApiKey, setHasApiKey] = useState(false);
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
-  
-  // Brand & Vibe
-  const [brand, setBrand] = useState<BrandArchetype>(BrandArchetype.DE_ROCHE);
   const [showVibeCheck, setShowVibeCheck] = useState(true);
-
-  // Generation Inputs
-  const [prompt, setPrompt] = useState('');
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [loadingStep, setLoadingStep] = useState(''); 
-  const [isEnhancing, setIsEnhancing] = useState(false);
-  const [isGettingInspiration, setIsGettingInspiration] = useState(false);
+  const [galleryFilter, setGalleryFilter] = useState<'ALL' | BrandArchetype>('ALL');
+  const [promptOverride, setPromptOverride] = useState<string | undefined>(undefined);
+  const [learningContext, setLearningContext] = useState<string[]>([]);
 
   // CONFIG & CONTROLS
-  // Refactored Casting State
   const [castGender, setCastGender] = useState('RANDOM');
   const [castVibe, setCastVibe] = useState('RANDOM');
   const [castHair, setCastHair] = useState('RANDOM');
@@ -74,11 +91,10 @@ const App: React.FC = () => {
   const [harmonyRule, setHarmonyRule] = useState<HarmonyRule>('MONOCHROMATIC');
   const [customHexInput, setCustomHexInput] = useState('');
   
-  // Source & Grounding
+  // Source
   const [sourceFidelity, setSourceFidelity] = useState<number>(50);
   const [sourceInterpretation, setSourceInterpretation] = useState<SourceInterpretation | undefined>(SourceInterpretation.BLEND_50_50);
   const [sourceMaterialPrompt, setSourceMaterialPrompt] = useState('');
-  const [useGrounding, setUseGrounding] = useState(false);
   
   // OUTPUT CONFIG
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>(AspectRatio.PORTRAIT);
@@ -92,11 +108,6 @@ const App: React.FC = () => {
   const [seed, setSeed] = useState(Math.random());
   const [customScenePrompt, setCustomScenePrompt] = useState('');
 
-  // Gallery Data
-  const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
-  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
-  const [comparisonImageId, setComparisonImageId] = useState<string | null>(null);
-
   // Modals & Sidebars
   const [marketingStrategy, setMarketingStrategy] = useState<MarketingStrategy | null>(null);
   const [isMarketingLoading, setIsMarketingLoading] = useState(false);
@@ -109,7 +120,7 @@ const App: React.FC = () => {
   const [activeLookForNarrative, setActiveLookForNarrative] = useState<CollectionLook | null>(null);
   const [showStudio, setShowStudio] = useState(false);
 
-  // Loaders for Sidebar Actions
+  // Loaders for Sidebar Actions (Kept local as they are transient tasks)
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   const [isGeneratingVariations, setIsGeneratingVariations] = useState(false);
   const [isSimulatingFabric, setIsSimulatingFabric] = useState(false);
@@ -122,9 +133,6 @@ const App: React.FC = () => {
   const inputClass = isDeRoche 
     ? 'bg-gray-50 border-gray-300 text-black focus:border-black placeholder-gray-400' 
     : 'bg-[#111] border-[#C5A059]/30 text-[#C5A059] focus:border-[#C5A059] placeholder-[#C5A059]/30';
-  const buttonClass = isDeRoche
-    ? 'bg-black text-white hover:bg-gray-800'
-    : 'bg-[#C5A059] text-black hover:bg-white';
   const textAccent = isDeRoche ? 'text-black' : 'text-[#C5A059]';
   const labelClass = "flex items-center justify-between mb-2 opacity-80 uppercase tracking-widest text-[9px] font-bold";
   
@@ -136,6 +144,16 @@ const App: React.FC = () => {
     });
   }, []);
 
+  useEffect(() => {
+    return () => {
+      generatedImages.forEach(img => {
+        if (img.url.startsWith('blob:')) {
+          URL.revokeObjectURL(img.url);
+        }
+      });
+    };
+  }, []);
+
   // --- HANDLERS ---
   const handleApiKeySelect = async () => {
     await selectApiKey();
@@ -143,6 +161,23 @@ const App: React.FC = () => {
     setHasApiKey(hasKey);
     if (hasKey) setShowApiKeyModal(false);
   };
+
+  const handleRateImage = useCallback((id: string, rating: number) => {
+    // Update store
+    updateGeneratedImage(id, { rating });
+    
+    if (rating >= 4) {
+       const img = generatedImages.find(i => i.id === id);
+       if (img) {
+           const successMarker = `Style Guide (${rating}★): ${img.prompt.slice(0, 100)}... [Vibe: ${img.modelPrompt || 'Unknown'}]`;
+           setLearningContext(prev => {
+               const newContext = [...prev, successMarker];
+               if (newContext.length > 5) return newContext.slice(-5);
+               return newContext;
+           });
+       }
+    }
+  }, [generatedImages, updateGeneratedImage]);
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>, targetBrand: BrandArchetype) => {
     if (e.target.files && e.target.files[0]) {
@@ -154,9 +189,9 @@ const App: React.FC = () => {
     }
   };
 
-  const handlePaletteChange = (colors: string[]) => {
+  const handlePaletteChange = useCallback((colors: string[]) => {
     setColorPalette(colors.join(', '));
-  };
+  }, []);
 
   const randomizeScene = () => {
     const envs = Object.values(EnvironmentPreset).filter(k => k !== 'RANDOM');
@@ -170,7 +205,6 @@ const App: React.FC = () => {
   };
 
   const generateCasting = () => {
-     // Populate individual fields randomly
      const getRandom = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
      setCastGender(getRandom(CASTING_GENDERS));
      setCastVibe(getRandom(CASTING_VIBES));
@@ -178,21 +212,41 @@ const App: React.FC = () => {
      setCastFace(getRandom(CASTING_FACE));
   };
 
-  const generateInspiration = async () => {
-    setIsGettingInspiration(true);
+  // Called by PromptInput (Enhance/Inspire handlers removed from App.tsx as logic moved to component or handled there)
+  // Wait, `onEnhance` and `onInspire` require API calls and state updates. 
+  // PromptInput still expects callbacks. I will keep the service calls here but remove state.
+  
+  const handleGetInspiration = async () => {
+    // Logic kept for PromptInput callback
     try {
         const castingStr = `Gender: ${castGender}, Vibe: ${castVibe}`;
         const { concept } = await generateCreativePrompt(brand, castingStr);
-        setPrompt(concept);
+        // We return string, component sets local state
+        return concept;
     } catch (e) {
         console.error(e);
-    } finally {
-        setIsGettingInspiration(false);
+        return "";
     }
   };
 
-  const handleGenerate = async () => {
-    if (!prompt && uploadedFiles.length === 0) return;
+  const handleEnhance = async (currentPrompt: string) => {
+    if (!currentPrompt) return "";
+    try {
+        const result = await enhancePrompt(currentPrompt, brand);
+        if (result.suggestedScene) {
+            if (result.suggestedScene.environment && result.suggestedScene.environment !== 'Random') setEnvironment(result.suggestedScene.environment);
+            if (result.suggestedScene.lighting && result.suggestedScene.lighting !== 'Random') setLighting(result.suggestedScene.lighting);
+            if (result.suggestedScene.framing && result.suggestedScene.framing !== 'Full Body') setFraming(result.suggestedScene.framing);
+        }
+        return result.improvedPrompt;
+    } catch (e: any) {
+        console.error("Enhance failed", e);
+        return "";
+    }
+  };
+
+  const handleGenerate = async (finalPrompt: string) => {
+    if (!finalPrompt && uploadedFiles.length === 0) return;
     setIsGenerating(true);
     setLoadingStep("ANALYZING BRIEF...");
 
@@ -206,7 +260,6 @@ const App: React.FC = () => {
     }, 2500);
 
     try {
-      // Construct Casting Prompt from individual fields
       let builtCasting = "";
       if (castGender !== 'RANDOM') builtCasting += `CASTING: ${castGender}. `;
       if (castVibe !== 'RANDOM') builtCasting += `VIBE: ${castVibe.toUpperCase()}. `;
@@ -215,7 +268,7 @@ const App: React.FC = () => {
       if (castDetails) builtCasting += `DETAILS: ${castDetails}.`;
 
       const images = await generateEditorialImages({
-        prompt,
+        prompt: finalPrompt,
         uploadedFiles,
         resolution,
         aspectRatio,
@@ -230,14 +283,15 @@ const App: React.FC = () => {
         sourceFidelity: sourceFidelity,
         sourceInterpretation: sourceInterpretation,
         logoBase64: (brand === BrandArchetype.DE_ROCHE ? deRocheLogo?.base64 : chaosLogo?.base64),
-        locationQuery: useGrounding ? prompt : undefined, 
-        sourceMaterialPrompt
+        locationQuery: useGrounding ? finalPrompt : undefined, 
+        sourceMaterialPrompt,
+        learningContext: learningContext 
       });
 
       const newImages: GeneratedImage[] = images.map(url => ({
         id: generateId(),
         url,
-        prompt,
+        prompt: finalPrompt,
         resolution,
         timestamp: Date.now(),
         brand,
@@ -245,10 +299,13 @@ const App: React.FC = () => {
         mode: undefined 
       }));
 
-      setGeneratedImages(prev => [...newImages, ...prev]);
+      // Store Update
+      setGeneratedImages((prev) => [...newImages, ...prev]);
     } catch (error: any) {
       console.error("Generation failed", error);
-      if (error.message?.includes("Failed to fetch")) {
+      if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+         alert("Request Timed Out: The generation took too long or was interrupted. Please try again.");
+      } else if (error.message?.includes("Failed to fetch")) {
         alert("Connection Error: Failed to fetch from the AI service. Please check your internet connection or try selecting a new API Key.");
       } else {
         alert("Generation failed. Please check the console for details.");
@@ -260,16 +317,6 @@ const App: React.FC = () => {
     }
   };
 
-  // ... (Keep existing edit/update handlers)
-  const handleUpdateImage = (id: string, newUrl: string) => {
-    setGeneratedImages(prev => prev.map(img => img.id === id ? { ...img, url: newUrl } : img));
-  };
-  const handleAddSketch = (originalImage: GeneratedImage, sketchUrl: string) => {
-     const sketchImage: GeneratedImage = {
-        ...originalImage, id: generateId(), url: sketchUrl, prompt: `Technical Sketch of ${originalImage.prompt}`, type: 'editorial'
-     };
-     setGeneratedImages(prev => [sketchImage, ...prev]);
-  };
   const handleEditImage = async (id: string, editPrompt: string): Promise<string> => {
     const img = generatedImages.find(i => i.id === id);
     if (!img) throw new Error("Image not found");
@@ -287,7 +334,7 @@ const App: React.FC = () => {
   };
   const triggerVideo = async (image: GeneratedImage) => {
     setIsGeneratingVideo(true);
-    try { const videoUrl = await generateVideo(image.url, image.prompt, image.brand); setGeneratedImages(prev => prev.map(img => img.id === image.id ? { ...img, videoUrl } : img)); } 
+    try { const videoUrl = await generateVideo(image.url, image.prompt, image.brand); updateGeneratedImage(image.id, { videoUrl }); } 
     catch (e) { console.error(e); alert("Failed"); } finally { setIsGeneratingVideo(false); }
   };
   const triggerVariations = async (image: GeneratedImage) => {
@@ -297,7 +344,7 @@ const App: React.FC = () => {
   };
   const triggerSimulateFabric = async (image: GeneratedImage, fabricDesc: string) => {
       setIsSimulatingFabric(true);
-      try { const videoUrl = await simulateFabricMovement(image.url, image.prompt, image.brand, fabricDesc); setGeneratedImages(prev => prev.map(img => img.id === image.id ? { ...img, videoUrl } : img)); } 
+      try { const videoUrl = await simulateFabricMovement(image.url, image.prompt, image.brand, fabricDesc); updateGeneratedImage(image.id, { videoUrl }); } 
       catch (e) { console.error(e); alert("Failed"); } finally { setIsSimulatingFabric(false); }
   };
 
@@ -308,9 +355,6 @@ const App: React.FC = () => {
 
       setIsIterating(true);
       try {
-          // This would ideally use a specialized iteration function, but for now we reuse generation with a seed
-          // In a real app, you'd pass the reference image ID to the generator to "evolve" it
-          // Here we mock it by updating the prompt slightly
           const images = await generateEditorialImages({
             prompt: `${originalImage.prompt}.`,
             uploadedFiles: [],
@@ -335,15 +379,29 @@ const App: React.FC = () => {
             type: 'editorial'
           }));
           
-          setGeneratedImages(prev => [...newImages, ...prev]);
-      } catch (e) {
+          setGeneratedImages((prev) => [...newImages, ...prev]);
+      } catch (e: any) {
           console.error(e);
-          alert("Iteration failed");
+          if (e.name !== 'AbortError') alert("Iteration failed");
       } finally {
           setIsIterating(false);
       }
   };
 
+  const handleStudioApply = async (prompt: string) => {
+      if (!selectedImageId) return;
+      setIsGenerating(true); 
+      try {
+          const newUrl = await handleEditImage(selectedImageId, prompt);
+          updateGeneratedImage(selectedImageId, { url: newUrl });
+          setShowStudio(false);
+      } catch (e: any) {
+          console.error(e);
+          if (e.name !== 'AbortError') alert("Failed to apply studio changes.");
+      } finally {
+          setIsGenerating(false);
+      }
+  };
 
   const renderSelectInput = (label: string, value: string, setValue: (val: string) => void, options: string[], placeholder: string) => {
     const isCustom = !options.includes(value) && value !== 'RANDOM';
@@ -372,6 +430,12 @@ const App: React.FC = () => {
       const options = Object.values(enumObj).filter((k: any) => k !== 'RANDOM') as string[];
       return renderSelectInput(label, value, setValue, options, placeholder);
   };
+
+  // --- FILTERED VIEW ---
+  const filteredImages = generatedImages.filter(img => {
+      if (galleryFilter === 'ALL') return true;
+      return img.brand === galleryFilter;
+  });
 
   return (
     <div className={`flex h-screen w-full overflow-hidden ${bgClass} font-sans selection:bg-pink-500 selection:text-white`}>
@@ -493,8 +557,8 @@ const App: React.FC = () => {
                <div className="flex items-center gap-2"><Layers size={12} /> <span>Source Material</span></div>
              </div>
              <div className="grid grid-cols-2 gap-2">
-                <UploadZone label="Mood" category="moodboard" files={uploadedFiles.filter(f => f.category === 'moodboard')} onAddFiles={(files) => setUploadedFiles([...uploadedFiles, ...files])} onRemoveFile={(id) => setUploadedFiles(uploadedFiles.filter(f => f.id !== id))} />
-                <UploadZone label="Ref" category="reference" files={uploadedFiles.filter(f => f.category === 'reference')} onAddFiles={(files) => setUploadedFiles([...uploadedFiles, ...files])} onRemoveFile={(id) => setUploadedFiles(uploadedFiles.filter(f => f.id !== id))} />
+                <UploadZone label="Mood" category="moodboard" files={uploadedFiles.filter(f => f.category === 'moodboard')} onAddFiles={(files) => addUploadedFiles(files)} onRemoveFile={removeUploadedFile} />
+                <UploadZone label="Ref" category="reference" files={uploadedFiles.filter(f => f.category === 'reference')} onAddFiles={(files) => addUploadedFiles(files)} onRemoveFile={removeUploadedFile} />
              </div>
              
              {uploadedFiles.length > 0 && (
@@ -518,21 +582,13 @@ const App: React.FC = () => {
              )}
           </section>
 
-          {/* SECTION 6: CREATIVE DIRECTION */}
-          <section>
-             <div className={labelClass}>
-                <div className="flex items-center gap-2"><Sparkles size={12} /> <span>Creative Direction</span></div>
-                <div className="flex gap-2">
-                   <button onClick={() => setUseGrounding(!useGrounding)} className={`flex items-center gap-1 transition-all text-[9px] ${useGrounding ? 'opacity-100 text-green-500 font-bold' : 'opacity-50 hover:opacity-100'}`} title="Search Grounding">
-                      <Globe size={10} /> {useGrounding ? 'GROUNDED' : 'OFFLINE'}
-                   </button>
-                   <button onClick={generateInspiration} disabled={isGettingInspiration} className="hover:underline flex items-center gap-1">
-                      {isGettingInspiration ? <Loader2 size={10} className="animate-spin"/> : <Wand2 size={10} />} Inspire Me
-                   </button>
-                </div>
-             </div>
-             <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="CONCEPT..." className={`w-full h-24 p-2 text-xs border rounded-sm resize-none outline-none ${inputClass}`} />
-          </section>
+          {/* SECTION 6: CREATIVE DIRECTION (NOW ISOLATED) */}
+          <PromptInput 
+             onGenerate={handleGenerate}
+             onEnhance={handleEnhance}
+             onInspire={handleGetInspiration}
+             overridePrompt={promptOverride}
+          />
 
           {/* SECTION 7: OUTPUT */}
           <section className="border-t border-dashed border-current opacity-80 pt-4">
@@ -550,54 +606,57 @@ const App: React.FC = () => {
                   </select>
               </div>
           </section>
-
-          {/* GENERATE BUTTON (Enhanced Loading State) */}
-          <button 
-            onClick={handleGenerate} 
-            disabled={isGenerating} 
-            className={`w-full py-4 text-xs font-bold uppercase tracking-widest transition-all hover:scale-[1.02] flex items-center justify-center gap-2 shadow-xl overflow-hidden relative ${buttonClass} ${isGenerating ? 'cursor-not-allowed' : ''}`}
-          >
-            {isGenerating ? (
-                <div className="flex w-full justify-between items-center px-4 relative z-10">
-                    <div className="flex items-center gap-2">
-                        <div className="animate-spin w-3 h-3 border-2 border-white/30 border-t-white rounded-full"></div>
-                        <span>FABRICATING</span>
-                    </div>
-                    {/* Small box for loading step on the right */}
-                    <div className={`text-[9px] font-mono opacity-80 border-l border-white/20 pl-3 ml-2 h-full flex items-center px-2 py-0.5 rounded ${isDeRoche ? 'bg-white/20 text-white' : 'bg-black/20 text-black'}`}>
-                        {loadingStep}
-                    </div>
-                </div>
-            ) : (
-                <><Zap size={14} /> Generate Editorial</>
-            )}
-            
-            {/* Subtle Progress Bar Animation */}
-            {isGenerating && (
-                <div className="absolute top-0 left-0 h-full w-full bg-white/10 animate-[pulse_2s_ease-in-out_infinite] origin-left"></div>
-            )}
-          </button>
         </div>
       </aside>
 
       {/* 2. MAIN GALLERY AREA */}
       <main className="flex-1 flex flex-col h-full relative z-10">
+         {/* GALLERY FILTER HEADER */}
+         <div className={`flex items-center justify-between px-6 py-4 border-b transition-colors ${isDeRoche ? 'border-gray-200 bg-white/50' : 'border-[#C5A059]/20 bg-black/50'} backdrop-blur-md sticky top-0 z-20`}>
+            <div className="flex items-center gap-2 opacity-50">
+               <LayoutGrid size={14} className={isDeRoche ? 'text-black' : 'text-[#C5A059]'} />
+               <span className={`text-[10px] font-bold uppercase tracking-widest ${isDeRoche ? 'text-black' : 'text-[#C5A059]'}`}>Atelier Archives ({filteredImages.length})</span>
+            </div>
+            
+            <div className="flex gap-1 bg-black/5 p-1 rounded-sm">
+                <button 
+                   onClick={() => setGalleryFilter('ALL')}
+                   className={`px-3 py-1 text-[9px] font-bold uppercase transition-all rounded-sm ${galleryFilter === 'ALL' ? (isDeRoche ? 'bg-black text-white shadow' : 'bg-[#C5A059] text-black shadow') : 'opacity-50 hover:opacity-100 hover:bg-black/5'}`}
+                >
+                   All
+                </button>
+                <button 
+                   onClick={() => setGalleryFilter(BrandArchetype.DE_ROCHE)}
+                   className={`px-3 py-1 text-[9px] font-bold uppercase transition-all rounded-sm ${galleryFilter === BrandArchetype.DE_ROCHE ? (isDeRoche ? 'bg-black text-white shadow' : 'bg-[#C5A059] text-black shadow') : 'opacity-50 hover:opacity-100 hover:bg-black/5'}`}
+                >
+                   De Roche
+                </button>
+                <button 
+                   onClick={() => setGalleryFilter(BrandArchetype.CHAOSCHICC)}
+                   className={`px-3 py-1 text-[9px] font-bold uppercase transition-all rounded-sm ${galleryFilter === BrandArchetype.CHAOSCHICC ? (isDeRoche ? 'bg-black text-white shadow' : 'bg-[#C5A059] text-black shadow') : 'opacity-50 hover:opacity-100 hover:bg-black/5'}`}
+                >
+                   Chaos
+                </button>
+            </div>
+         </div>
+
          <div className="flex-1 overflow-y-auto p-4 md:p-8">
-            {generatedImages.length === 0 ? (
+            {filteredImages.length === 0 ? (
                <div className="h-full flex flex-col items-center justify-center opacity-30 text-center">
-                  <LayoutGrid size={48} className="mb-4" />
-                  <p className="text-sm font-mono uppercase tracking-widest">Atelier is empty.</p>
-                  <p className="text-xs mt-2">Configure parameters and initialize generation.</p>
+                  <Filter size={48} className="mb-4" />
+                  <p className="text-sm font-mono uppercase tracking-widest">No assets found in filter.</p>
+                  <p className="text-xs mt-2">Adjust filter or generate new concepts.</p>
                </div>
             ) : (
                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {generatedImages.map(img => (
+                  {filteredImages.map(img => (
                      <div key={img.id} className="aspect-[3/4]">
                         <GeneratedImageCard 
                            image={img}
                            isSelected={comparisonImageId === img.id}
                            onToggleSelect={() => setComparisonImageId(comparisonImageId === img.id ? null : img.id)}
                            onOpenSidebar={() => setSelectedImageId(img.id)}
+                           onRate={(r) => handleRateImage(img.id, r)}
                         />
                      </div>
                   ))}
@@ -607,7 +666,14 @@ const App: React.FC = () => {
       </main>
 
       {/* 3. COLLECTION ARCHITECT */}
-      <CollectionArchitect brand={brand} images={generatedImages} onOpenNarrative={setActiveLookForNarrative} onVisualizeLook={(look) => { setPrompt(`${look.coreItem} in ${look.material}. ${look.vibe} vibe. ${look.silhouette} silhouette.`); }} />
+      <Suspense fallback={
+         <div className="fixed bottom-8 left-8 bg-black/80 text-white p-4 rounded flex items-center gap-2 z-[9999]">
+            <Loader2 className="animate-spin" /> Initializing Tldraw Engine...
+         </div>
+      }>
+         <CollectionArchitect brand={brand} images={generatedImages} onOpenNarrative={setActiveLookForNarrative} onVisualizeLook={(look) => { setPromptOverride(`${look.coreItem} in ${look.material}. ${look.vibe} vibe. ${look.silhouette} silhouette.`); }} />
+      </Suspense>
+      
       <ChatBot brand={brand} />
 
       {/* MODALS */}
@@ -615,10 +681,9 @@ const App: React.FC = () => {
       {showVibeCheck && <VibeCheck onClose={() => setShowVibeCheck(false)} onComplete={(b) => { setBrand(b); setShowVibeCheck(false); }} />}
       {selectedImageId && (
          <RightSidebar 
-            selectedImage={generatedImages.find(i => i.id === selectedImageId) || null}
             onClose={() => setSelectedImageId(null)}
-            onUpdateImage={handleUpdateImage}
-            onAddSketch={handleAddSketch}
+            // State passed via store in component
+            // Service callbacks still passed
             onEditStart={handleEditImage}
             onGenerateTechPack={triggerTechPack}
             isGeneratingTechPack={isGeneratingTechPack}
@@ -634,11 +699,27 @@ const App: React.FC = () => {
             onOpenStudio={() => setShowStudio(true)}
          />
       )}
-      {showMarketingModal && <MarketingModal strategy={marketingStrategy} isLoading={isMarketingLoading} brand={brand} onClose={() => setShowMarketingModal(false)} onVisualize={(p) => setPrompt(p)} />}
-      {showTechPackModal && techPack && selectedImageId && <TechPackModal techPack={techPack} image={generatedImages.find(i => i.id === selectedImageId)!} onClose={() => setShowTechPackModal(false)} />}
+      {showMarketingModal && <MarketingModal strategy={marketingStrategy} isLoading={isMarketingLoading} brand={brand} onClose={() => setShowMarketingModal(false)} onVisualize={(p) => setPromptOverride(p)} />}
+      
+      {showTechPackModal && techPack && selectedImageId && (
+         <Suspense fallback={
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 text-white">
+               <Loader2 size={48} className="animate-spin mb-4" />
+               <p>Compiling Technical Data...</p>
+            </div>
+         }>
+            <TechPackModal techPack={techPack} image={generatedImages.find(i => i.id === selectedImageId)!} onClose={() => setShowTechPackModal(false)} />
+         </Suspense>
+      )}
+
       {comparisonImageId && selectedImageId && comparisonImageId !== selectedImageId && <ImageComparator image1={generatedImages.find(i => i.id === selectedImageId)!} image2={generatedImages.find(i => i.id === comparisonImageId)!} onClose={() => setComparisonImageId(null)} />}
       {activeLookForNarrative && <NarrativeEngine look={activeLookForNarrative} brand={brand} onClose={() => setActiveLookForNarrative(null)} onSendToProduction={(narrative) => { console.log("Narrative approved:", narrative); setActiveLookForNarrative(null); }} />}
-      {showStudio && selectedImageId && <ImmersiveStudio image={generatedImages.find(i => i.id === selectedImageId)!} brand={brand} onClose={() => setShowStudio(false)} />}
+      {showStudio && selectedImageId && <ImmersiveStudio 
+          image={generatedImages.find(i => i.id === selectedImageId)!} 
+          brand={brand} 
+          onClose={() => setShowStudio(false)} 
+          onApplyToImage={handleStudioApply}
+      />}
     </div>
   );
 };

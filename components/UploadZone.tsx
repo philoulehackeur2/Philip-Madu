@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Upload, X, AlertCircle } from 'lucide-react';
 import { UploadedFile } from '../types';
-import { fileToBase64, generateId } from '../utils';
+import { fileToBase64, generateId, resizeImage } from '../utils';
 
 interface UploadZoneProps {
   label: string;
@@ -39,13 +39,16 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
       }
 
       try {
-        const base64 = await fileToBase64(file);
+        // RESIZE IMAGE ON CLIENT SIDE
+        const resizedBlob = await resizeImage(file, 1024);
+        const base64 = await fileToBase64(resizedBlob);
+        
         newFiles.push({
           id: generateId(),
           file,
-          previewUrl: URL.createObjectURL(file),
+          previewUrl: URL.createObjectURL(resizedBlob), // Use the resized blob for preview
           base64,
-          mimeType: file.type,
+          mimeType: resizedBlob.type, // Use the actual type (likely jpeg)
           category
         });
       } catch (error) {

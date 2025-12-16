@@ -1,5 +1,5 @@
 
-export const fileToBase64 = (file: File): Promise<string> => {
+export const fileToBase64 = (file: Blob): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -18,6 +18,65 @@ export const fileToBase64 = (file: File): Promise<string> => {
 
 export const generateId = (): string => {
   return Math.random().toString(36).substring(2, 15);
+};
+
+export const resizeImage = (file: File, maxDimension: number = 1024): Promise<Blob> => {
+  return new Promise((resolve, reject) => {
+    // Check if it is an image
+    if (!file.type.startsWith('image/')) {
+        resolve(file); // Don't resize non-images
+        return;
+    }
+
+    const img = new Image();
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = reject;
+
+    img.onload = () => {
+      let { width, height } = img;
+      
+      // Calculate new dimensions if needed
+      if (width > maxDimension || height > maxDimension) {
+        const aspectRatio = width / height;
+        if (width > height) {
+          width = maxDimension;
+          height = Math.round(maxDimension / aspectRatio);
+        } else {
+          height = maxDimension;
+          width = Math.round(maxDimension * aspectRatio);
+        }
+      } else {
+          // No resize needed, resolve original
+          resolve(file);
+          return;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+          reject(new Error("Could not get canvas context"));
+          return;
+      }
+      
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      // High quality JPEG output for consistency and compression
+      canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error("Image resizing failed"));
+      }, 'image/jpeg', 0.85);
+    };
+    
+    img.onerror = reject;
+    
+    reader.readAsDataURL(file);
+  });
 };
 
 // --- COLOR UTILS ---

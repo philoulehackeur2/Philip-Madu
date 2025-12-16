@@ -1,4 +1,5 @@
-import React, { useState, useCallback } from 'react';
+
+import React, { useState, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Tldraw, 
@@ -19,7 +20,7 @@ import {
   DropAnimation,
   pointerWithin
 } from '@dnd-kit/core';
-import { Layers, SplitSquareHorizontal, Wand2, RefreshCw, X, Maximize2 } from 'lucide-react';
+import { Layers, SplitSquareHorizontal, X } from 'lucide-react';
 import { BrandArchetype, GeneratedImage } from '../types';
 import { FashionCardUtil, ComparisonUtil } from './TldrawShapes';
 
@@ -31,7 +32,7 @@ interface CollectionArchitectProps {
 }
 
 // --- SIDEBAR ITEM (DRAGGABLE) ---
-const SidebarItem = ({ image, isOverlay = false }: { image: GeneratedImage, isOverlay?: boolean }) => {
+const SidebarItem = memo(({ image, isOverlay = false }: { image: GeneratedImage, isOverlay?: boolean }) => {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `asset-${image.id}`,
     data: { 
@@ -60,7 +61,7 @@ const SidebarItem = ({ image, isOverlay = false }: { image: GeneratedImage, isOv
       </div>
     </div>
   );
-};
+});
 
 // --- MAIN COMPONENT ---
 // Define shape utils array
@@ -74,7 +75,7 @@ const dropAnimation: DropAnimation = {
   }),
 };
 
-export const CollectionArchitect: React.FC<CollectionArchitectProps> = ({ brand, images, onVisualizeLook }) => {
+export const CollectionArchitect = memo<CollectionArchitectProps>(({ brand, images, onVisualizeLook }) => {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [activeDragImage, setActiveDragImage] = useState<GeneratedImage | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -106,13 +107,8 @@ export const CollectionArchitect: React.FC<CollectionArchitectProps> = ({ brand,
     if (over && over.id === 'canvas-droppable' && editor) {
       const assetData = active.data.current;
       
-      // Calculate drop position relative to the window
-      // We rely on Tldraw's viewport conversion
-      // This is a simplification; for precise drop we normally use event.client coordinates
-      // translated to page coordinates.
-      
       if (assetData && assetData.type === 'fashion-asset') {
-         // Get the center of the viewport to drop if we can't calculate exact coord easily without mouse event
+         // Get the center of the viewport to drop
          const { x, y } = editor.getViewportScreenCenter();
          
          editor.createShape({
@@ -244,4 +240,4 @@ export const CollectionArchitect: React.FC<CollectionArchitectProps> = ({ brand,
       </div>
     </DndContext>
   );
-}
+});

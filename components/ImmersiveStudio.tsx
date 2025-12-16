@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Sliders, Palette, ChevronLeft, Layers, Zap, Command, Lock } from 'lucide-react';
+import { Sliders, Palette, ChevronLeft, Layers, Zap, Command, Lock, Wand2 } from 'lucide-react';
 import { GeneratedImage, BrandArchetype, HarmonyRule } from '../types';
 import { PatternCutter } from './PatternCutter';
 import { ColorHarmonyWheel } from './ColorHarmonyWheel';
@@ -9,6 +9,7 @@ interface ImmersiveStudioProps {
   image: GeneratedImage;
   onClose: () => void;
   brand: BrandArchetype;
+  onApplyToImage?: (prompt: string) => void;
 }
 
 // --- SPECIFIC BRAND PANTONE ANCHORS ---
@@ -41,7 +42,7 @@ const THEORY_RULES: { id: HarmonyRule, label: string }[] = [
   { id: 'SPLIT_COMPLEMENTARY', label: 'Split' },
 ];
 
-export const ImmersiveStudio: React.FC<ImmersiveStudioProps> = ({ image, onClose, brand }) => {
+export const ImmersiveStudio: React.FC<ImmersiveStudioProps> = ({ image, onClose, brand, onApplyToImage }) => {
   const [xRayValue, setXRayValue] = useState(0); 
   const [selectedKeyColor, setSelectedKeyColor] = useState(BRAND_KEYS[0]);
   
@@ -66,6 +67,14 @@ export const ImmersiveStudio: React.FC<ImmersiveStudioProps> = ({ image, onClose
     }
     // Theory mode updates are handled via callback from Wheel
   }, [harmonyMode, selectedRecipeIndex, brand]);
+
+  const handleApply = () => {
+      if (onApplyToImage) {
+          const colors = activePalette.join(', ');
+          const prompt = `Apply a color grading of [${colors}] with ${gradingOpacity}% intensity. The look should be consistent with the current lighting but tinted with these specific hues.`;
+          onApplyToImage(prompt);
+      }
+  };
 
   return (
     <div className={`fixed inset-0 z-50 flex flex-col ${isDeRoche ? 'theme-deroche' : 'theme-chaos'} bg-[#050505]`}>
@@ -181,7 +190,7 @@ export const ImmersiveStudio: React.FC<ImmersiveStudioProps> = ({ image, onClose
                   </div>
                </div>
 
-               {/* 3. HARMONY ENGINE (The Choice) */}
+               {/* 3. HARMONY ENGINE & RENDER BUTTON */}
                <div className="flex flex-col items-center md:items-end gap-3 min-w-[280px]">
                   <div className="flex items-center gap-4 mb-1">
                      <span className="text-[10px] uppercase tracking-widest text-gray-500 font-bold flex items-center gap-2">
@@ -231,7 +240,7 @@ export const ImmersiveStudio: React.FC<ImmersiveStudioProps> = ({ image, onClose
                   )}
                   
                   {/* Palette Readout */}
-                  <div className="flex gap-2 mt-2">
+                  <div className="flex gap-2 mt-2 justify-end">
                      {activePalette.map((hex, i) => (
                         <div key={i} className="group relative">
                            <div className="w-10 h-6 border border-white/10 transition-transform group-hover:scale-110" style={{ backgroundColor: hex }}></div>
@@ -239,6 +248,16 @@ export const ImmersiveStudio: React.FC<ImmersiveStudioProps> = ({ image, onClose
                         </div>
                      ))}
                   </div>
+
+                  {/* RENDER BUTTON */}
+                  {onApplyToImage && (
+                      <button 
+                        onClick={handleApply}
+                        className={`w-full mt-2 py-3 text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${isDeRoche ? 'bg-white text-black hover:bg-gray-200' : 'bg-[#C5A059] text-black hover:bg-white'}`}
+                      >
+                        <Wand2 size={14} /> Render Changes
+                      </button>
+                  )}
                </div>
 
             </div>

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Download, Edit2, Check, ExternalLink, Star, Tag } from 'lucide-react';
+import React, { useState, memo } from 'react';
+import { Download, Edit2, Check, Star, Tag } from 'lucide-react';
 import { GeneratedImage, BrandArchetype } from '../types';
 
 interface GeneratedImageCardProps {
@@ -11,7 +11,7 @@ interface GeneratedImageCardProps {
   onAddCollection?: (collection: string) => void;
 }
 
-export const GeneratedImageCard: React.FC<GeneratedImageCardProps> = ({ 
+export const GeneratedImageCard = memo<GeneratedImageCardProps>(({ 
   image, 
   isSelected, 
   onToggleSelect, 
@@ -153,4 +153,4 @@ export const GeneratedImageCard: React.FC<GeneratedImageCardProps> = ({
       </div>
     </div>
   );
-};
+});
