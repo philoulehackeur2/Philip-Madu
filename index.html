@@ -1,0 +1,221 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LUMIÈRE EDITORIAL</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://esm.sh/tldraw@2.1.0/tldraw.css" />
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,400&family=Montserrat:wght@200;300;400;500&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Michroma&family=Rubik+Glitch&family=Space+Mono:wght@400;700&display=swap');
+      
+      /* --- CRITICAL CSS RESET & ISOLATION --- */
+      /* Tldraw.css pollutes global styles. We must override them here to preserve the App's UI. */
+      
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden; /* App handles scrolling */
+        /* Force App Font Stack over Tldraw's defaults */
+        font-family: 'Space Mono', monospace !important; 
+      }
+
+      /* Tldraw adds background/borders to all buttons. We reset this to support Tailwind utilities. */
+      button {
+        background-color: transparent;
+        background-image: none;
+        border: none;
+        padding: 0;
+        margin: 0;
+        font-family: inherit;
+        font-size: inherit;
+        color: inherit;
+        cursor: pointer;
+      }
+      
+      /* Reset inputs to avoid Tldraw styling overriding transparency */
+      input, select, textarea {
+        font-family: inherit;
+      }
+
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 4px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: rgba(255,255,255,0.2);
+        border-radius: 2px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: rgba(255,255,255,0.4);
+      }
+
+      /* --- GLOBAL TYPOGRAPHY (UNIFIED) --- */
+      .font-header {
+        font-family: 'Michroma', sans-serif !important;
+        text-transform: uppercase;
+        letter-spacing: -1px;
+      }
+      
+      .font-body {
+        font-family: 'Space Mono', monospace !important;
+      }
+
+      /* --- THEME 1: DE ROCHE (SILVER) --- */
+      .theme-deroche {
+        --roche-light: #E6E1E7;   /* Platinum */
+        --roche-silver: #A7A8AA;  /* Primary Silver */
+        --roche-void: #232222;    /* Charcoal */
+        
+        font-family: 'Space Mono', monospace;
+        color: var(--roche-void);
+        height: 100vh;
+        overflow: hidden;
+        position: relative;
+        background: linear-gradient(180deg, #FFFFFF 0%, var(--roche-light) 40%, var(--roche-silver) 100%);
+      }
+
+      .theme-deroche h1, .theme-deroche h2, .theme-deroche .font-header {
+        font-family: 'Michroma', sans-serif;
+      }
+
+      .roche-card {
+        background: rgba(255,255,255,0.15);
+        border: 1px solid var(--roche-silver);
+        backdrop-filter: blur(4px);
+        clip-path: polygon(0 0, 100% 0, 100% 100%, 0% 100%); 
+        transition: transform 0.3s;
+      }
+      .roche-card:hover { 
+        background: rgba(255,255,255,0.3); 
+        border-color: var(--roche-void);
+      }
+      
+      .roche-btn {
+        background: var(--roche-silver);
+        color: white;
+        border: 1px solid var(--roche-silver);
+        font-family: 'Space Mono', monospace;
+        text-transform: uppercase;
+        font-weight: 700;
+        transition: 0.2s;
+        /* Re-apply padding here since we reset it globally */
+        padding: 0.5rem 1rem; 
+      }
+      .roche-btn:hover { background: var(--roche-void); border-color: var(--roche-void); color: white; }
+      .roche-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+      .roche-input {
+        background: rgba(255,255,255,0.5);
+        border: 1px solid var(--roche-silver);
+        color: var(--roche-void);
+        font-family: 'Space Mono', monospace;
+      }
+      .roche-input::placeholder { color: rgba(35,34,34, 0.5); }
+
+
+      /* --- THEME 2: CHAOSCHICC (GOLD) --- */
+      .theme-chaos {
+        --c-gold: #C5A059;        /* Primary Gold */
+        --c-dark: #0a0a0a;        /* Void Black */
+        --c-white: #E6E1E7;
+        
+        /* UNIFIED FONT TO MATCH DE ROCHE */
+        font-family: 'Space Mono', monospace;
+        background-color: var(--c-dark);
+        color: var(--c-gold);
+        height: 100vh;
+        overflow: hidden;
+        position: relative;
+      }
+
+      .theme-chaos h1, .theme-chaos h2, .theme-chaos .font-header {
+        /* UNIFIED HEADER FONT */
+        font-family: 'Michroma', sans-serif; 
+        text-shadow: 0 0 10px rgba(197, 160, 89, 0.3);
+      }
+
+      .paint-blobs {
+        position: absolute;
+        top: 0; left: 0; width: 100%; height: 100%;
+        z-index: 0;
+        filter: blur(80px);
+        opacity: 0.4;
+        pointer-events: none;
+      }
+      .blob { position: absolute; border-radius: 50%; }
+      .b1 { width: 60vw; height: 60vw; background: #1a1a1a; top: -20%; left: -10%; }
+      .b2 { width: 40vw; height: 40vw; background: #3d3118; bottom: -10%; right: -10%; } /* Dark Gold Shadow */
+      .b3 { width: 30vw; height: 30vw; background: var(--c-gold); top: 30%; left: 30%; opacity: 0.2; }
+
+      .noise-overlay {
+        position: absolute;
+        top: 0; left: 0; width: 100%; height: 100%;
+        z-index: 1;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.08'/%3E%3C/svg%3E");
+        pointer-events: none;
+      }
+
+      /* CHAOS COMPONENTS (GOLD THEME) */
+      .chaos-card {
+        background: rgba(10, 10, 10, 0.6);
+        border: 1px solid rgba(197, 160, 89, 0.3);
+        backdrop-filter: blur(10px);
+        clip-path: polygon(2% 0, 100% 0, 100% 95%, 95% 100%, 0 100%, 0 5%);
+        transition: 0.3s;
+      }
+      .chaos-card:hover {
+        background: rgba(197, 160, 89, 0.1);
+        box-shadow: 0 0 15px rgba(197, 160, 89, 0.2);
+        border-color: var(--c-gold);
+      }
+
+      .chaos-btn {
+        background: transparent;
+        border: 1px solid var(--c-gold);
+        color: var(--c-gold);
+        font-family: 'Space Mono', monospace; /* UNIFIED */
+        font-weight: 700;
+        cursor: pointer;
+        transition: 0.2s;
+        /* Re-apply padding */
+        padding: 0.5rem 1rem;
+      }
+      .chaos-btn:hover { background: var(--c-gold); color: black; box-shadow: 0 0 15px var(--c-gold); }
+      .chaos-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+      .chaos-input {
+        background: rgba(0,0,0,0.5);
+        border: 1px solid var(--c-gold);
+        color: var(--c-gold);
+        font-family: 'Space Mono', monospace; /* UNIFIED */
+      }
+      .chaos-input::placeholder { color: rgba(197, 160, 89, 0.5); }
+
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react/": "https://esm.sh/react@18.2.0/",
+    "react-dom": "https://esm.sh/react-dom@18.2.0",
+    "react-dom/": "https://esm.sh/react-dom@18.2.0/",
+    "lucide-react": "https://esm.sh/lucide-react@0.263.1?deps=react@18.2.0",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.33.0",
+    "jspdf": "https://aistudiocdn.com/jspdf@2.5.1/dist/jspdf.es.min.js",
+    "tldraw": "https://esm.sh/tldraw@2.1.0?deps=react@18.2.0,react-dom@18.2.0",
+    "@dnd-kit/core": "https://esm.sh/@dnd-kit/core@6.1.0?deps=react@18.2.0,react-dom@18.2.0",
+    "@dnd-kit/utilities": "https://esm.sh/@dnd-kit/utilities@3.2.2?deps=react@18.2.0,react-dom@18.2.0",
+    "@dnd-kit/modifiers": "https://esm.sh/@dnd-kit/modifiers@7.0.0?deps=react@18.2.0,react-dom@18.2.0"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
