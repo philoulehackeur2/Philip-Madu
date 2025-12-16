@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { GeneratedImage, BrandArchetype } from '../types';
-import { Loader2, Sparkles, FileText, X, Wand2, PenTool, Copy, Video, Waves, GitBranch, Zap, Split, TestTube, Edit3, Palette, Ruler, Image as ImageIcon, Maximize2 } from 'lucide-react';
+import { Loader2, Sparkles, FileText, X, Wand2, PenTool, Copy, Video, Waves, GitBranch, Zap, Split, TestTube, Edit3, Palette, Ruler, Image as ImageIcon, Maximize2, UserPlus } from 'lucide-react';
 import { generateConceptSketch, modifyGarmentFabric } from '../services/geminiService';
 import { PatternCutter } from './PatternCutter';
 
@@ -23,6 +23,7 @@ interface RightSidebarProps {
   onGenerateStrategy: (image: GeneratedImage) => void;
   isGeneratingStrategy: boolean;
   onOpenStudio: () => void;
+  onSaveAsModel?: (image: GeneratedImage) => void;
 }
 
 export const RightSidebar = React.memo<RightSidebarProps>(({
@@ -42,7 +43,8 @@ export const RightSidebar = React.memo<RightSidebarProps>(({
   onGenerateIteration,
   onGenerateStrategy,
   isGeneratingStrategy,
-  onOpenStudio
+  onOpenStudio,
+  onSaveAsModel
 }) => {
   const [activeTab, setActiveTab] = useState<'ATELIER' | 'CONSTRUCTION'>('ATELIER');
   const [showPatternCutter, setShowPatternCutter] = useState(false);
@@ -198,6 +200,17 @@ export const RightSidebar = React.memo<RightSidebarProps>(({
                 <Maximize2 size={12} /> Enter Studio
              </button>
           </div>
+          
+          {/* RECRUIT TO AGENCY BUTTON */}
+          {onSaveAsModel && (
+             <button 
+                onClick={() => onSaveAsModel(selectedImage)}
+                className={`w-full py-2 flex items-center justify-center gap-2 text-[9px] font-bold uppercase tracking-widest border rounded-sm transition-all hover:bg-white/10 ${borderColor} ${accentColor}`}
+                title="Save this character as a reusable model for future generations"
+             >
+                <UserPlus size={12} /> Recruit to Agency
+             </button>
+          )}
         </div>
 
         {/* --- ATELIER TAB (Creative) --- */}

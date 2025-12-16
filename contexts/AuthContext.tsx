@@ -83,15 +83,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (user && user.isAnonymous) {
       const uid = user.uid;
       try {
-        // 1. Wipe Data
-        await wipeGuestData(uid);
+        // 1. Wipe Data (Best Effort)
+        // We wrap this in a try-catch so that if storage deletion fails (e.g. network),
+        // we STILL delete the auth user and let them leave.
+        try {
+            await wipeGuestData(uid);
+        } catch (wipeError) {
+            console.warn("Guest data wipe incomplete (continuing to exit):", wipeError);
+        }
+
         // 2. Delete Auth User (This automatically logs out)
         await deleteUser(user);
         setUser(null);
         setUserProfile(null);
       } catch (e) {
-        console.error("Failed to delete guest account", e);
-        throw e;
+        console.error("Failed to delete guest auth user", e);
+        // Fallback: Force sign out so they can at least leave the screen
+        await firebaseSignOut(auth);
+        setUser(null);
+        setUserProfile(null);
       }
     }
   };

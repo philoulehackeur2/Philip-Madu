@@ -381,8 +381,8 @@ export const saveModelToAgency = async (blob: Blob, type: 'UPLOADED' | 'GENERATE
   
   try {
     const modelId = generateId();
-    // Save to distinct folder
-    const path = `atelier/${auth.currentUser.uid}/models/${modelId}.png`;
+    // Save to user_uploads folder to match security rules
+    const path = `user_uploads/${auth.currentUser.uid}/models/${modelId}.png`;
     const storageRef = ref(storage, path);
 
     await uploadBytes(storageRef, blob);
@@ -435,4 +435,3 @@ export const dataURLtoBlob = (dataurl: string): Blob => {
   }
   return new Blob([u8arr], { type: mime });
 };
-    

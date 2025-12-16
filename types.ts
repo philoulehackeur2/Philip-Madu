@@ -86,7 +86,8 @@ export interface UploadedFile {
 
 export interface GeneratedImage {
   id: string;
-  url: string; // Data URL
+  url: string; // Data URL or Remote URL
+  localUrl?: string; // Session Blob URL (Safe from CORS)
   prompt: string;
   modelPrompt?: string; // Specific casting description
   resolution: ImageResolution;

@@ -334,18 +334,52 @@ export const generateEditorialImages = async ({
   const abstractNouns = ["Decay", "Geometry", "Hysteria", "Silence", "Glitch", "Echo", "Mutation"];
   const bizarrePairing = `${getRandom(artAdjectives)} ${getRandom(abstractNouns)}`;
   
-  const finalModelDescription = modelPrompt || generateRandomModelProfile(brand);
-  const sentiment = getRandom(MODEL_FEATURES.vibes);
+  // LOGIC: If referenceModelUrl exists, prioritize it and ignore random descriptions that conflict
+  let finalModelDescription = modelPrompt || generateRandomModelProfile(brand);
+  let idPreservationInstruction = "";
 
+  const parts: any[] = [];
+
+  // --- 1. PRIORITY: MODEL REFERENCE (If Exists) ---
+  if (referenceModelUrl) {
+      try {
+          const { base64, mimeType } = await getBase64FromUrl(referenceModelUrl);
+          parts.push({ inlineData: { mimeType, data: base64 } });
+          parts.push({
+             text: "PRIMARY REFERENCE (MODEL IDENTITY): The image above is the specific model booked for this shoot. You MUST maintain this person's exact facial identity, bone structure, age, and ethnicity. Ignore any conflicting text descriptions of physical features."
+          });
+          
+          // Override the random text description to focus on identity preservation
+          finalModelDescription = "The specific model shown in the first reference image. " + (modelPrompt || ""); 
+          idPreservationInstruction = "- FACE/IDENTITY: STRICT ADHERENCE to the reference image. Do not change facial features.";
+      } catch (e) {
+          console.warn("Failed to load reference model image - proceeding without it.", e);
+      }
+  }
+
+  // --- 2. SECONDARY: MOOD/STYLE REFERENCE ---
+  const sentiment = getRandom(MODEL_FEATURES.vibes);
   let referenceAnchorText = "";
+  
   if (uploadedFiles.length > 0) {
     const fidelityInstruction = sourceFidelity > 80 
         ? "STRICT FIDELITY: Reproduce visual elements closely."
         : `CREATIVE FREEDOM (FIDELITY ${sourceFidelity}%): Extract the VIBE.`;
     const specificInstructions = sourceMaterialPrompt ? `USER NOTES: "${sourceMaterialPrompt}".` : "";
-    referenceAnchorText = `SOURCE MATERIAL: ${fidelityInstruction} ${specificInstructions} MODE: ${sourceInterpretation || 'VIBE TRANSFER'}`;
+    referenceAnchorText = `SOURCE MATERIAL (STYLE ONLY): ${fidelityInstruction} ${specificInstructions} MODE: ${sourceInterpretation || 'VIBE TRANSFER'}`;
+    
+    uploadedFiles.forEach(file => {
+      parts.push({ inlineData: { mimeType: file.mimeType, data: file.base64 } });
+    });
+    parts.push({ text: "STYLE REFERENCE: Use the above images for lighting, texture, and mood guidance only. Do not blend their faces." });
   }
 
+  if (logoBase64) {
+    parts.push({ inlineData: { mimeType: 'image/png', data: logoBase64 } });
+    parts.push({ text: "BRAND LOGO: Integrate this logo naturally." });
+  }
+
+  // ... rest of prompt construction ...
   let iterationInstruction = "";
   if (iterationMode !== 'NONE') {
       iterationInstruction = `MODE: ${iterationMode}. Refine, Mutate, or Break the concept based on this directive.`;
@@ -354,29 +388,6 @@ export const generateEditorialImages = async ({
   let learningInstruction = "";
   if (learningContext && learningContext.length > 0) {
       learningInstruction = `[INTELLIGENT REFINEMENT]: Incorporate: ${learningContext.slice(-3).join('; ')}`;
-  }
-
-  const parts: any[] = [];
-  uploadedFiles.forEach(file => {
-    parts.push({ inlineData: { mimeType: file.mimeType, data: file.base64 } });
-  });
-  if (logoBase64) {
-    parts.push({ inlineData: { mimeType: 'image/png', data: logoBase64 } });
-  }
-
-  // --- REFERENCE MODEL LOGIC (UPDATED & SAFEGUARDED) ---
-  if (referenceModelUrl) {
-      try {
-          const { base64, mimeType } = await getBase64FromUrl(referenceModelUrl);
-          parts.push({ inlineData: { mimeType, data: base64 } });
-          parts.push({
-             text: "CRITICAL INSTRUCTION: Use the image provided above as the CHARACTER REFERENCE. Maintain the exact facial features, skin tone, and body type of this person. Only change the clothing and environment based on the description below."
-          });
-      } catch (e) {
-          console.warn("Failed to load reference model image - proceeding without it.", e);
-          // We intentionally do NOT throw here, allowing the generation to proceed with a random model
-          // instead of breaking the entire app flow.
-      }
   }
 
   const variedPrompt = injectSynonyms(prompt);
@@ -417,6 +428,7 @@ export const generateEditorialImages = async ({
     - PHOTOGRAPHY: Raw 150MP output. ${isLookbook ? 'Commercial clarity.' : ''}
     - SKIN: EXTREME REALISM. Visible pores, vellus hair, sweat. NO AI SMOOTHING.
     - IMPERFECTIONS: ${isLookbook ? 'None. Perfect clarity.' : 'Chromatic aberration, film grain.'}
+    ${idPreservationInstruction}
     ${isLookbook ? '- POSE: Standing, full view of outfit.' : '- LIGHTING: Inverse square law fallout.'}
   `;
 

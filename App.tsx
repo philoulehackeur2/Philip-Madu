@@ -5,7 +5,8 @@ import {
   Users, Palette, Layers, 
   Monitor, Sliders, RefreshCw,
   X, Type, Hexagon, Fingerprint, Filter, Loader2, Sparkles, Plus,
-  LogOut, Settings, HardDrive, Mail, UserCheck, ArrowRight, ShieldCheck
+  LogOut, Settings, HardDrive, Mail, UserCheck, ArrowRight, ShieldCheck,
+  Star, Upload, Check, AlertTriangle // Added icons
 } from 'lucide-react';
 import { 
   GeneratedImage, BrandArchetype, EnvironmentPreset, 
@@ -23,7 +24,7 @@ import {
 } from './services/geminiService';
 import { 
   uploadFile, getAssetDownloadUrl, getUserStorageUsage, 
-  uploadGeneratedAsset, fetchMyModels 
+  uploadGeneratedAsset, fetchMyModels, saveModelToAgency
 } from './services/storageService';
 
 // Firebase Imports
@@ -303,6 +304,8 @@ const App: React.FC = () => {
   const [storageUsed, setStorageUsed] = useState(0);
   const [savedModels, setSavedModels] = useState<SavedModel[]>([]);
   const [selectedAgentModel, setSelectedAgentModel] = useState<SavedModel | null>(null);
+  const [isUploadingModel, setIsUploadingModel] = useState(false);
+  const [castingTab, setCastingTab] = useState<'AUTO' | 'AGENCY'>('AUTO');
   
   // Brand & Vibe
   const [brand, setBrand] = useState<BrandArchetype>(BrandArchetype.DE_ROCHE);
@@ -462,6 +465,83 @@ const App: React.FC = () => {
     }
   };
 
+  // --- MODEL RECRUITMENT ---
+  const handleSaveAsModel = async (image: GeneratedImage) => {
+    if (!user) return;
+    try {
+        setLoadingStep("RECRUITING AGENT...");
+        setIsGenerating(true);
+        
+        let blob: Blob;
+        // Prefer localUrl (session blob) if available to avoid CORS
+        const sourceUrl = image.localUrl || image.url;
+
+        if (sourceUrl.startsWith('data:')) {
+             const arr = sourceUrl.split(',');
+             const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/png';
+             const bstr = atob(arr[1]);
+             let n = bstr.length;
+             const u8arr = new Uint8Array(n);
+             while (n--) u8arr[n] = bstr.charCodeAt(n);
+             blob = new Blob([u8arr], { type: mime });
+        } else {
+             try {
+                 // Try standard fetch first (works for same-origin blobs)
+                 const response = await fetch(sourceUrl, { mode: 'cors', credentials: 'omit' });
+                 if (!response.ok) throw new Error("Network fetch failed");
+                 blob = await response.blob();
+             } catch (fetchErr) {
+                 console.warn("Fetch failed, attempting canvas fallback", fetchErr);
+                 // Canvas Fallback for CORS opaque images (try anonymous)
+                 blob = await new Promise((resolve, reject) => {
+                     const img = new Image();
+                     img.crossOrigin = "Anonymous";
+                     img.onload = () => {
+                         const canvas = document.createElement('canvas');
+                         canvas.width = img.width;
+                         canvas.height = img.height;
+                         const ctx = canvas.getContext('2d');
+                         if(ctx) {
+                             ctx.drawImage(img, 0, 0);
+                             canvas.toBlob(b => b ? resolve(b) : reject(new Error("Canvas blob failed")), 'image/png');
+                         } else reject(new Error("No canvas context"));
+                     };
+                     img.onerror = () => reject(new Error("Image load failed due to CORS restrictions"));
+                     img.src = sourceUrl;
+                 });
+             }
+        }
+
+        await saveModelToAgency(blob, 'GENERATED');
+        await refreshStorageUsage(); 
+        alert("Agent Recruited Successfully");
+    } catch (e: any) {
+        console.error("Failed to save model", e);
+        alert("Failed to recruit agent. The image source may be restricted. Try downloading and re-uploading.");
+    } finally {
+        setIsGenerating(false);
+        setLoadingStep("");
+    }
+  };
+
+  const handleModelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setIsUploadingModel(true);
+      try {
+        const file = e.target.files[0];
+        const newModel = await saveModelToAgency(file, 'UPLOADED');
+        await refreshStorageUsage();
+        setSelectedAgentModel(newModel);
+        setCastingTab('AGENCY');
+      } catch (error) {
+        console.error("Model upload failed", error);
+        alert("Failed to import model.");
+      } finally {
+        setIsUploadingModel(false);
+      }
+    }
+  };
+
   const handleRateImage = useCallback((id: string, rating: number) => {
     setGeneratedImages(prev => prev.map(img => img.id === id ? { ...img, rating } : img));
     if (rating >= 4) {
@@ -543,10 +623,16 @@ const App: React.FC = () => {
 
     try {
       let builtCasting = ""; 
-      if (castGender !== 'RANDOM') builtCasting += `CASTING: ${castGender}. `; 
+      // Only include physical attributes if NO agent model is selected
+      // If an agent model IS selected, we don't want "shaved head" text clashing with a "long hair" image.
+      if (!selectedAgentModel) {
+          if (castGender !== 'RANDOM') builtCasting += `CASTING: ${castGender}. `; 
+          if (castHair !== 'RANDOM') builtCasting += `HAIR: ${castHair}. `; 
+          if (castFace !== 'RANDOM') builtCasting += `FACE: ${castFace}. `; 
+      }
+      
+      // Vibe and Details are modifiers that can apply to a visual reference too (e.g. expression)
       if (castVibe !== 'RANDOM') builtCasting += `VIBE: ${castVibe.toUpperCase()}. `; 
-      if (castHair !== 'RANDOM') builtCasting += `HAIR: ${castHair}. `; 
-      if (castFace !== 'RANDOM') builtCasting += `FACE: ${castFace}. `; 
       if (castDetails) builtCasting += `DETAILS: ${castDetails}.`;
 
       let activePalette = undefined; 
@@ -595,6 +681,7 @@ const App: React.FC = () => {
                   return {
                       id: savedAsset.id,
                       url: savedAsset.downloadUrl,
+                      localUrl: tempUrl, // KEEP SESSION BLOB FOR CORS-FREE OPERATIONS
                       prompt: finalPrompt,
                       resolution,
                       timestamp: Date.now(),
@@ -604,12 +691,12 @@ const App: React.FC = () => {
                       seed: currentSeed
                   };
               } catch (e) {
-                  return { id: generateId(), url: tempUrl, prompt: finalPrompt, resolution, timestamp: Date.now(), brand, type: 'editorial', mode: imageMode, seed: currentSeed };
+                  return { id: generateId(), url: tempUrl, localUrl: tempUrl, prompt: finalPrompt, resolution, timestamp: Date.now(), brand, type: 'editorial', mode: imageMode, seed: currentSeed };
               }
           }));
           refreshStorageUsage(); 
       } else {
-          savedImages = tempImages.map(url => ({ id: generateId(), url, prompt: finalPrompt, resolution, timestamp: Date.now(), brand, type: 'editorial', mode: imageMode, seed: currentSeed }));
+          savedImages = tempImages.map(url => ({ id: generateId(), url, localUrl: url, prompt: finalPrompt, resolution, timestamp: Date.now(), brand, type: 'editorial', mode: imageMode, seed: currentSeed }));
       }
 
       setGeneratedImages(prev => [...savedImages, ...prev]);
@@ -623,8 +710,8 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUpdateImage = (id: string, newUrl: string) => { setGeneratedImages(prev => prev.map(img => { if (img.id === id) { if (img.url !== newUrl && img.url.startsWith('blob:')) { URL.revokeObjectURL(img.url); } return { ...img, url: newUrl }; } return img; })); };
-  const handleAddSketch = (originalImage: GeneratedImage, sketchUrl: string) => { const sketchImage: GeneratedImage = { ...originalImage, id: generateId(), url: sketchUrl, prompt: `Technical Sketch of ${originalImage.prompt}`, type: 'editorial' }; setGeneratedImages(prev => [sketchImage, ...prev]); };
+  const handleUpdateImage = (id: string, newUrl: string) => { setGeneratedImages(prev => prev.map(img => { if (img.id === id) { if (img.url !== newUrl && img.url.startsWith('blob:')) { URL.revokeObjectURL(img.url); } return { ...img, url: newUrl, localUrl: newUrl }; } return img; })); };
+  const handleAddSketch = (originalImage: GeneratedImage, sketchUrl: string) => { const sketchImage: GeneratedImage = { ...originalImage, id: generateId(), url: sketchUrl, localUrl: sketchUrl, prompt: `Technical Sketch of ${originalImage.prompt}`, type: 'editorial' }; setGeneratedImages(prev => [sketchImage, ...prev]); };
   const handleEditImage = async (id: string, editPrompt: string): Promise<string> => {
     const img = generatedImages.find(i => i.id === id);
     if (!img) throw new Error("Image not found");
@@ -640,7 +727,7 @@ const App: React.FC = () => {
     setIsGeneratingVariations(true);
     try {
         const vars = await generateVariations(image.url, image.prompt, image.brand);
-        const newImages = vars.map(url => ({ ...image, id: generateId(), url, timestamp: Date.now() }));
+        const newImages = vars.map(url => ({ ...image, id: generateId(), url, localUrl: url, timestamp: Date.now() }));
         setGeneratedImages(prev => [...newImages, ...prev]);
         if (user) { await Promise.all(newImages.map(async (img) => { try { const blob = await (await fetch(img.url)).blob(); await uploadFile(user.uid, blob, `var_${img.id}.png`, 'generated_editorial', { prompt: `VARIATION: ${img.prompt}`, brand: img.brand }, img.id); } catch(e) { console.error("Auto-save var failed", e); } })); refreshStorageUsage(); }
     } catch (e) { console.error(e); alert("Failed"); } finally { setIsGeneratingVariations(false); }
@@ -656,7 +743,7 @@ const App: React.FC = () => {
             prompt: `${originalImage.prompt}.`, uploadedFiles: [], resolution: originalImage.resolution, aspectRatio: AspectRatio.PORTRAIT, brand: originalImage.brand,
             environment: environment, lighting: lighting, framing: framing, seed: Math.random(), iterationMode: mode, referenceImageId: originalImage.id
           });
-          const newImages: GeneratedImage[] = images.map(url => ({ id: generateId(), url, prompt: `Iteration (${mode}): ${originalImage.prompt}`, resolution: originalImage.resolution, timestamp: Date.now(), brand: originalImage.brand, type: 'editorial' }));
+          const newImages: GeneratedImage[] = images.map(url => ({ id: generateId(), url, localUrl: url, prompt: `Iteration (${mode}): ${originalImage.prompt}`, resolution: originalImage.resolution, timestamp: Date.now(), brand: originalImage.brand, type: 'editorial' }));
           setGeneratedImages((prev) => [...newImages, ...prev]);
           if (user) { await Promise.all(newImages.map(async (img) => { try { const blob = await (await fetch(img.url)).blob(); await uploadFile(user.uid, blob, `iter_${img.id}.png`, 'generated_editorial', { prompt: img.prompt, brand: img.brand, notes: `Iteration Mode: ${mode}` }, img.id); } catch(e) { console.error("Auto-save iteration failed", e); } })); refreshStorageUsage(); }
       } catch (e: any) { console.error(e); } finally { setIsIterating(false); }
@@ -759,66 +846,128 @@ const App: React.FC = () => {
             </div>
           </section>
 
-          {/* SECTION 4: CASTING & AGENCY */}
+          {/* SECTION 4: CASTING & AGENCY (UPDATED TABBED VIEW) */}
           <section>
              <div className={labelClass}>
-                <div className="flex items-center gap-2"><Users size={12} /> <span>Casting & Agency</span></div>
-                <button onClick={generateCasting} className="flex items-center gap-1 hover:underline cursor-pointer" title="Randomize Model"><RefreshCw size={10} /> AUTO-CAST</button>
+                <div className="flex items-center gap-2"><Users size={12} /> <span>Casting Director</span></div>
              </div>
              
-             {/* THE AGENCY: SAVED MODELS */}
-             {savedModels.length > 0 && (
-                <div className="mb-3">
-                   <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar snap-x">
-                      {/* Random / None Option */}
-                      <button 
-                         onClick={() => setSelectedAgentModel(null)}
-                         className={`flex-shrink-0 w-12 h-12 rounded-full border-2 flex items-center justify-center transition-all ${!selectedAgentModel ? (isDeRoche ? 'border-black bg-black text-white' : 'border-[#C5A059] bg-[#C5A059] text-black') : 'border-transparent bg-white/5 opacity-50 hover:opacity-100'}`}
-                         title="Random Model"
-                      >
-                         <Dice5 size={16} />
-                      </button>
-                      
-                      {savedModels.map((model) => (
-                         <button
-                            key={model.id}
-                            onClick={() => setSelectedAgentModel(model)}
-                            className={`flex-shrink-0 w-12 h-12 rounded-full border-2 overflow-hidden transition-all snap-center relative ${selectedAgentModel?.id === model.id ? (isDeRoche ? 'border-black ring-2 ring-offset-2 ring-offset-[#f4f4f4] ring-black' : 'border-[#C5A059] ring-2 ring-offset-2 ring-offset-[#050505] ring-[#C5A059]') : 'border-transparent opacity-60 hover:opacity-100'}`}
-                         >
-                            <img src={model.url} className="w-full h-full object-cover" />
-                            {selectedAgentModel?.id === model.id && (
-                               <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                                  <UserCheck size={16} className="text-white drop-shadow-md" />
-                               </div>
-                            )}
-                         </button>
-                      ))}
-                   </div>
-                   {selectedAgentModel && (
-                      <div className="text-[9px] text-center mt-1 font-mono opacity-60">
-                         ACTIVE AGENT: {selectedAgentModel.name || selectedAgentModel.id.slice(0,6)}
-                      </div>
-                   )}
-                </div>
-             )}
-
-             <div className={`space-y-1 ${selectedAgentModel ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
-                {renderSelectInput("Gender", castGender, setCastGender, CASTING_GENDERS, "e.g. Female")}
-                {renderSelectInput("Vibe", castVibe, setCastVibe, CASTING_VIBES, "e.g. Regal")}
-                {renderSelectInput("Hair", castHair, setCastHair, CASTING_HAIR, "e.g. Shaved")}
-                {renderSelectInput("Face", castFace, setCastFace, CASTING_FACE, "e.g. Alien")}
-                <div className="relative mt-2"><div className="absolute left-2 top-1/2 -translate-y-1/2 opacity-50"><Fingerprint size={10} /></div><input type="text" value={castDetails} onChange={(e) => setCastDetails(e.target.value)} placeholder="SPECIFIC MARKINGS / DETAILS..." className={`w-full py-2 pl-6 pr-2 text-[10px] border-b bg-transparent rounded-none focus:outline-none placeholder-opacity-50 ${isDeRoche ? 'border-gray-300 text-black placeholder-gray-400' : 'border-[#C5A059]/30 text-[#C5A059] placeholder-[#C5A059]/30'}`} /></div>
+             {/* TABS */}
+             <div className="flex gap-1 mb-3">
+               <button 
+                 onClick={() => { setCastingTab('AUTO'); setSelectedAgentModel(null); }}
+                 className={`flex-1 py-2 text-[8px] uppercase font-bold tracking-wider border rounded-sm transition-all ${castingTab === 'AUTO' ? (isDeRoche ? 'bg-black text-white border-black' : 'bg-[#C5A059] text-black border-[#C5A059]') : 'opacity-50 border-transparent hover:opacity-100'}`}
+               >
+                 <RefreshCw size={10} className="inline mr-1"/> Auto-Cast
+               </button>
+               <button 
+                 onClick={() => setCastingTab('AGENCY')}
+                 className={`flex-1 py-2 text-[8px] uppercase font-bold tracking-wider border rounded-sm transition-all ${castingTab === 'AGENCY' ? (isDeRoche ? 'bg-black text-white border-black' : 'bg-[#C5A059] text-black border-[#C5A059]') : 'opacity-50 border-transparent hover:opacity-100'}`}
+               >
+                 <Star size={10} className="inline mr-1"/> Agency ({savedModels.length})
+               </button>
              </div>
+
+             {castingTab === 'AGENCY' ? (
+               <div className={`p-3 border rounded-sm ${isDeRoche ? 'bg-gray-100 border-gray-300' : 'bg-black/40 border-[#C5A059]/30'}`}>
+                  <div className="grid grid-cols-3 gap-2 mb-3 max-h-40 overflow-y-auto custom-scrollbar">
+                    {/* UPLOAD BUTTON */}
+                    <label className="aspect-square border border-dashed rounded flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 opacity-60 hover:opacity-100 transition-all">
+                       {isUploadingModel ? <RefreshCw className="animate-spin" size={14}/> : <Upload size={14} />}
+                       <span className="text-[7px] mt-1 uppercase font-bold">Import</span>
+                       <input type="file" accept="image/*" className="hidden" onChange={handleModelImport} />
+                    </label>
+
+                    {/* MODEL CARDS */}
+                    {savedModels.map(model => (
+                      <button 
+                        key={model.id}
+                        onClick={() => setSelectedAgentModel(model)}
+                        className={`relative aspect-square rounded overflow-hidden border-2 transition-all ${selectedAgentModel?.id === model.id ? (isDeRoche ? 'border-black' : 'border-[#C5A059]') : 'border-transparent opacity-60 hover:opacity-100'}`}
+                      >
+                        <img src={model.url} className="w-full h-full object-cover" />
+                        {selectedAgentModel?.id === model.id && (
+                          <div className={`absolute inset-0 flex items-center justify-center bg-black/40`}>
+                            <Check size={16} className="text-white drop-shadow-md" />
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[8px] text-center opacity-50 uppercase font-mono">
+                     {selectedAgentModel ? "Model Locked for Consistency" : "Select a model to lock face"}
+                  </p>
+               </div>
+             ) : (
+               <div className={`space-y-1 opacity-80 animate-in fade-in duration-300`}>
+                  {renderSelectInput("Gender", castGender, setCastGender, CASTING_GENDERS, "e.g. Female")}
+                  {renderSelectInput("Vibe", castVibe, setCastVibe, CASTING_VIBES, "e.g. Regal")}
+                  {renderSelectInput("Hair", castHair, setCastHair, CASTING_HAIR, "e.g. Shaved")}
+                  {renderSelectInput("Face", castFace, setCastFace, CASTING_FACE, "e.g. Alien")}
+                  <div className="relative mt-2"><div className="absolute left-2 top-1/2 -translate-y-1/2 opacity-50"><Fingerprint size={10} /></div><input type="text" value={castDetails} onChange={(e) => setCastDetails(e.target.value)} placeholder="SPECIFIC MARKINGS / DETAILS..." className={`w-full py-2 pl-6 pr-2 text-[10px] border-b bg-transparent rounded-none focus:outline-none placeholder-opacity-50 ${isDeRoche ? 'border-gray-300 text-black placeholder-gray-400' : 'border-[#C5A059]/30 text-[#C5A059] placeholder-[#C5A059]/30'}`} /></div>
+                  <div className="p-2 mt-2 text-[8px] text-center border border-dashed rounded opacity-50 font-mono">
+                     AI will generate a unique face for every shot.
+                  </div>
+               </div>
+             )}
           </section>
 
-          {/* SECTION 5: SOURCE MATERIAL */}
+          {/* SECTION 5: SOURCE MATERIAL (UPDATED UI) */}
           <section>
              <div className={labelClass}><div className="flex items-center gap-2"><Layers size={12} /> <span>Source Material</span></div></div>
              <div className="grid grid-cols-2 gap-2">
                 <UploadZone label="Mood" category="moodboard" files={uploadedFiles.filter(f => f.category === 'moodboard')} onAddFiles={(files) => setUploadedFiles([...uploadedFiles, ...files])} onRemoveFile={(id) => setUploadedFiles(uploadedFiles.filter(f => f.id !== id))} />
                 <UploadZone label="Ref" category="reference" files={uploadedFiles.filter(f => f.category === 'reference')} onAddFiles={(files) => setUploadedFiles([...uploadedFiles, ...files])} onRemoveFile={(id) => setUploadedFiles(uploadedFiles.filter(f => f.id !== id))} />
              </div>
-             {uploadedFiles.length > 0 && (<div className="space-y-2 mt-2"><div className="grid grid-cols-2 gap-1.5">{Object.values(SourceInterpretation).map((mode) => (<button key={mode} onClick={() => setSourceInterpretation(sourceInterpretation === mode ? undefined : mode)} className={`px-2 py-1.5 text-[8px] uppercase border font-medium truncate transition-all ${sourceInterpretation === mode ? 'bg-current text-black' : (isDeRoche ? 'border-gray-300 text-gray-600 hover:border-black' : 'border-[#C5A059]/30 text-[#C5A059] hover:border-[#C5A059]')}`}>{mode.replace(/_/g, ' ')}</button>))}</div><textarea value={sourceMaterialPrompt} onChange={(e) => setSourceMaterialPrompt(e.target.value)} placeholder="SOURCE NOTES (e.g. 'Use texture from Image A')..." className={`w-full h-10 p-2 text-[9px] border rounded-sm resize-none outline-none font-mono ${inputClass}`} /><div><div className="flex justify-between text-[9px] font-bold uppercase opacity-70 mb-1"><span>Vibe Only</span><span>Strict Fidelity</span></div><input type="range" min="0" max="100" step="10" value={sourceFidelity} onChange={(e) => setSourceFidelity(Number(e.target.value))} className={`w-full h-1 bg-gray-500/30 rounded-lg appearance-none cursor-pointer ${isDeRoche ? '[&::-webkit-slider-thumb]:bg-black' : '[&::-webkit-slider-thumb]:bg-[#C5A059]'} [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full`} /></div></div>)}
+             
+             {uploadedFiles.length > 0 && (
+               <div className="space-y-3 mt-3 border-t border-dashed border-current/20 pt-3">
+                  <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-widest opacity-70 mb-2">
+                     <span>AI Interpretation Logic</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                     {Object.values(SourceInterpretation).map((mode) => (
+                        <button 
+                           key={mode} 
+                           onClick={() => setSourceInterpretation(sourceInterpretation === mode ? undefined : mode)} 
+                           className={`
+                              px-3 py-2 text-[8px] font-bold uppercase tracking-wider border rounded-sm transition-all truncate
+                              ${sourceInterpretation === mode 
+                                 ? (isDeRoche ? 'bg-black text-white border-black' : 'bg-[#C5A059] text-black border-[#C5A059]')
+                                 : (isDeRoche ? 'bg-white text-gray-500 border-gray-300 hover:border-black hover:text-black' : 'bg-[#111] text-[#C5A059] border-[#C5A059]/30 hover:border-[#C5A059] hover:bg-[#C5A059]/10')
+                              }
+                           `}
+                        >
+                           {mode.replace(/_/g, ' ')}
+                        </button>
+                     ))}
+                  </div>
+                  
+                  <div className="space-y-2">
+                     <textarea 
+                        value={sourceMaterialPrompt} 
+                        onChange={(e) => setSourceMaterialPrompt(e.target.value)} 
+                        placeholder="SPECIFIC INSTRUCTIONS (e.g. 'Use texture from Image A')..." 
+                        className={`w-full h-16 p-2 text-[9px] border rounded-sm resize-none outline-none font-mono ${inputClass} ${isDeRoche ? 'bg-white' : 'bg-[#111]'}`} 
+                     />
+                     <div className={`p-2 rounded-sm border ${isDeRoche ? 'bg-white border-gray-200' : 'bg-[#111] border-[#C5A059]/20'}`}>
+                        <div className="flex justify-between text-[8px] font-bold uppercase opacity-70 mb-2">
+                           <span>Vibe Only</span>
+                           <span>Strict Fidelity</span>
+                        </div>
+                        <input 
+                           type="range" 
+                           min="0" 
+                           max="100" 
+                           step="10" 
+                           value={sourceFidelity} 
+                           onChange={(e) => setSourceFidelity(Number(e.target.value))} 
+                           className={`w-full h-1 bg-gray-500/30 rounded-lg appearance-none cursor-pointer ${isDeRoche ? '[&::-webkit-slider-thumb]:bg-black' : '[&::-webkit-slider-thumb]:bg-[#C5A059]'} [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full`} 
+                        />
+                     </div>
+                  </div>
+               </div>
+             )}
           </section>
 
           {/* SECTION 6: CREATIVE DIRECTION */}
@@ -903,7 +1052,26 @@ const App: React.FC = () => {
       {showApiKeyModal && <ApiKeyModal onSelect={handleApiKeySelect} />}
       {showProfileModal && <ProfileModal onClose={() => setShowProfileModal(false)} />}
       {showVibeCheck && <VibeCheck onClose={() => setShowVibeCheck(false)} onComplete={(b) => { setBrand(b); setShowVibeCheck(false); }} />}
-      {selectedImageId && (<RightSidebar selectedImage={generatedImages.find(i => i.id === selectedImageId) || null} onClose={() => setSelectedImageId(null)} onUpdateImage={handleUpdateImage} onAddSketch={handleAddSketch} onEditStart={handleEditImage} onGenerateTechPack={triggerTechPack} isGeneratingTechPack={isGeneratingTechPack} onGenerateVariations={triggerVariations} isGeneratingVariations={isGeneratingVariations} onGenerateVideo={triggerVideo} isGeneratingVideo={isGeneratingVideo} onSimulateFabric={triggerSimulateFabric} isSimulatingFabric={isSimulatingFabric} onGenerateIteration={handleIterationTrigger} onGenerateStrategy={triggerMarketing} isGeneratingStrategy={isMarketingLoading} onOpenStudio={() => setShowStudio(true)} />)}
+      {selectedImageId && (<RightSidebar 
+          selectedImage={generatedImages.find(i => i.id === selectedImageId) || null} 
+          onClose={() => setSelectedImageId(null)} 
+          onUpdateImage={handleUpdateImage} 
+          onAddSketch={handleAddSketch} 
+          onEditStart={handleEditImage} 
+          onGenerateTechPack={triggerTechPack} 
+          isGeneratingTechPack={isGeneratingTechPack} 
+          onGenerateVariations={triggerVariations} 
+          isGeneratingVariations={isGeneratingVariations} 
+          onGenerateVideo={triggerVideo} 
+          isGeneratingVideo={isGeneratingVideo} 
+          onSimulateFabric={triggerSimulateFabric} 
+          isSimulatingFabric={isSimulatingFabric} 
+          onGenerateIteration={handleIterationTrigger} 
+          onGenerateStrategy={triggerMarketing} 
+          isGeneratingStrategy={isMarketingLoading} 
+          onOpenStudio={() => setShowStudio(true)}
+          onSaveAsModel={handleSaveAsModel}
+      />)}
       {showMarketingModal && <MarketingModal strategy={marketingStrategy} isLoading={isMarketingLoading} brand={brand} onClose={() => setShowMarketingModal(false)} onVisualize={(p) => setPromptOverride(p)} />}
       {showTechPackModal && techPack && selectedImageId && (<Suspense fallback={<div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 text-white"><Loader2 size={48} className="animate-spin mb-4" /><p>Compiling Technical Data...</p></div>}><TechPackModal techPack={techPack} image={generatedImages.find(i => i.id === selectedImageId)!} onClose={() => setShowTechPackModal(false)} /></Suspense>)}
       {comparisonImageId && selectedImageId && comparisonImageId !== selectedImageId && <ImageComparator image1={generatedImages.find(i => i.id === selectedImageId)!} image2={generatedImages.find(i => i.id === comparisonImageId)!} onClose={() => setComparisonImageId(null)} />}
