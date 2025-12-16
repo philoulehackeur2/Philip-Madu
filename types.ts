@@ -241,7 +241,8 @@ export interface SavedModel {
   id: string;
   url: string; // Firebase Storage URL
   type: 'UPLOADED' | 'GENERATED';
-  name?: string; // Optional nickname e.g., "Sasha"
+  name?: string; // User defined name
+  biometricData?: string; // The scan result string
   timestamp: number;
 }
 

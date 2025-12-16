@@ -6,7 +6,7 @@ import {
   Monitor, Sliders, RefreshCw,
   X, Type, Hexagon, Fingerprint, Filter, Loader2, Sparkles, Plus,
   LogOut, Settings, HardDrive, Mail, UserCheck, ArrowRight, ShieldCheck,
-  Star, Upload, Check, AlertTriangle // Added icons
+  Star, Upload, Check, AlertTriangle, KeyRound, Globe
 } from 'lucide-react';
 import { 
   GeneratedImage, BrandArchetype, EnvironmentPreset, 
@@ -20,12 +20,14 @@ import {
   generateMarketingStrategy, generateTechPack, 
   editGeneratedImage, generateVideo, generateVariations, 
   simulateFabricMovement, enhancePrompt,
-  generateCreativePrompt
+  generateCreativePrompt,
+  getBase64FromUrl
 } from './services/geminiService';
 import { 
   uploadFile, getAssetDownloadUrl, getUserStorageUsage, 
-  uploadGeneratedAsset, fetchMyModels, saveModelToAgency
+  uploadGeneratedAsset, fetchUserAssets, updateAssetRating
 } from './services/storageService';
+import { updateUserProfile } from './services/userService';
 
 // Firebase Imports
 import { 
@@ -34,12 +36,10 @@ import {
   updateProfile, 
   sendEmailVerification,
   sendPasswordResetEmail,
-  setPersistence,
-  browserLocalPersistence,
-  browserSessionPersistence,
 } from 'firebase/auth';
 import { auth } from './firebase';
 import { useAuth } from './contexts/AuthContext';
+import { useAppStore } from './store'; // GLOBAL STATE
 
 import { ApiKeyModal } from './components/ApiKeyModal';
 import { UploadZone } from './components/UploadZone';
@@ -55,12 +55,14 @@ import { PromptInput } from './components/PromptInput';
 import { ProfileModal } from './components/ProfileModal';
 import { ArchiveControls } from './components/ArchiveControls';
 import { GuestExitModal } from './components/GuestExitModal';
+import { ModelRecruiterModal } from './components/ModelRecruiterModal';
+import { CastingDirector } from './components/CastingDirector';
+import { TryOnModal } from './components/TryOnModal';
 
 // Lazy Load Heavy Components
 const TechPackModal = lazy(() => import('./components/TechPackModal').then(module => ({ default: module.TechPackModal })));
 const CollectionArchitect = lazy(() => import('./components/CollectionArchitect').then(module => ({ default: module.CollectionArchitect })));
 
-// --- CONSTANTS ---
 const STORAGE_LIMIT = 5 * 1024 * 1024 * 1024; // 5 GB
 
 const formatBytes = (bytes: number, decimals = 2) => {
@@ -71,12 +73,6 @@ const formatBytes = (bytes: number, decimals = 2) => {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
 }
-
-// --- CASTING CONSTANTS ---
-const CASTING_GENDERS = ["Female", "Male", "Non-Binary", "Androgynous", "Fluid", "Alien", "Unspecified"];
-const CASTING_VIBES = ["Regal", "Manic", "Ethereal", "Feral", "Minimalist", "Cybernetic", "Opulent", "Decayed", "Vulnerable", "Haughty"];
-const CASTING_HAIR = ["Shaved", "Architectural Bob", "Wet-Look Long", "Spiked", "Buzzcut", "Wind-Swept", "Braided", "Bleached", "Natural Afro"];
-const CASTING_FACE = ["Classic", "Alien", "Severe", "Doll-like", "Pierced", "Tattooed", "Gaunt", "Freckled", "Fresh"];
 
 // --- BRAND COLOR DATA ---
 const BRAND_RECIPES = {
@@ -92,23 +88,8 @@ const BRAND_RECIPES = {
   ]
 };
 
-const BRAND_PANTONES = {
-  [BrandArchetype.DE_ROCHE]: [
-    { name: 'Neutral Black C', hex: '#232222' },
-    { name: 'Cool Gray 6 C', hex: '#A7A8AA' },
-    { name: '663 C', hex: '#E6E1E6' },
-    { name: 'True Black', hex: '#000000' }
-  ],
-  [BrandArchetype.CHAOSCHICC]: [
-    { name: '2617 C', hex: '#4F2170' },
-    { name: '7554 C', hex: '#9E8A66' },
-    { name: 'Blood Red', hex: '#8B0000' },
-    { name: 'Void', hex: '#000000' }
-  ]
-};
-
 // --- AUTH COMPONENTS ---
-type AuthView = 'SPLASH' | 'MEMBER_LOGIN' | 'REGISTER';
+type AuthView = 'SPLASH' | 'MEMBER_LOGIN' | 'REGISTER' | 'FORGOT_PASSWORD';
 
 const AuthScreen = ({ onLogin }: { onLogin: () => void }) => {
   const { signInWithGoogle, signInGuest } = useAuth();
@@ -118,6 +99,7 @@ const AuthScreen = ({ onLogin }: { onLogin: () => void }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   // Quick Guest Entry
@@ -140,7 +122,11 @@ const AuthScreen = ({ onLogin }: { onLogin: () => void }) => {
     try {
         await signInWithEmailAndPassword(auth, email, password);
     } catch (err: any) {
-        setError("Invalid Credentials");
+        if (err.code === 'auth/invalid-credential') {
+            setError("Invalid email or password.");
+        } else {
+            setError("Login failed. Please try again.");
+        }
     } finally {
         setIsLoading(false);
     }
@@ -152,7 +138,6 @@ const AuthScreen = ({ onLogin }: { onLogin: () => void }) => {
     setError('');
     try {
         await createUserWithEmailAndPassword(auth, email, password);
-        // Auth Listener will handle the redirection
     } catch (err: any) {
         if (err.code === 'auth/email-already-in-use') {
             setError("Email is already registered.");
@@ -166,9 +151,29 @@ const AuthScreen = ({ onLogin }: { onLogin: () => void }) => {
     }
   };
 
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) {
+      setError("Please enter your email address above.");
+      return;
+    }
+    setIsLoading(true);
+    setError('');
+    setSuccessMsg('');
+    try {
+      await sendPasswordResetEmail(auth, email);
+      setSuccessMsg("Reset link sent to " + email);
+      setTimeout(() => setView('MEMBER_LOGIN'), 3000);
+    } catch (err: any) {
+      setError(err.message || "Failed to send reset email.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleGoogle = async () => {
       setIsLoading(true);
-      try { await signInWithGoogle(); } catch(e) { setError("Google Sign In Failed"); } finally { setIsLoading(false); }
+      try { await signInWithGoogle(); } catch(e) { setError("Google Sign In Failed. Popup closed?"); } finally { setIsLoading(false); }
   };
 
   return (
@@ -189,8 +194,6 @@ const AuthScreen = ({ onLogin }: { onLogin: () => void }) => {
 
         {view === 'SPLASH' && (
            <div className="w-full space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
-              
-              {/* PRIMARY ACTION: ENTER (Guest) */}
               <button 
                 onClick={handleEnterAtelier} 
                 disabled={isLoading}
@@ -207,7 +210,6 @@ const AuthScreen = ({ onLogin }: { onLogin: () => void }) => {
                  )}
               </button>
 
-              {/* SECONDARY: Member Access */}
               <div className="pt-8 border-t border-white/10 w-full">
                  <button 
                     onClick={() => setView('MEMBER_LOGIN')} 
@@ -222,13 +224,14 @@ const AuthScreen = ({ onLogin }: { onLogin: () => void }) => {
         )}
 
         {view === 'MEMBER_LOGIN' && (
-           <div className="w-full space-y-4 animate-in fade-in zoom-in-95 duration-300 bg-[#111] p-8 border border-white/10">
+           <div className="w-full space-y-4 animate-in fade-in zoom-in-95 duration-300 bg-[#111] p-8 border border-white/10 shadow-2xl">
               <div className="flex justify-between items-center mb-4">
                  <h2 className="text-xs font-bold uppercase tracking-widest">Identify Yourself</h2>
                  <button onClick={() => setView('SPLASH')} className="text-gray-500 hover:text-white" title="Back to Home"><X size={14}/></button>
               </div>
               
-              <button onClick={handleGoogle} className="w-full py-3 bg-[#333] text-white text-[10px] font-bold uppercase tracking-wider hover:bg-[#444]">
+              <button onClick={handleGoogle} className="w-full py-3 bg-[#333] text-white text-[10px] font-bold uppercase tracking-wider hover:bg-[#444] flex items-center justify-center gap-3 transition-colors">
+                 <svg className="w-4 h-4" viewBox="0 0 24 24"><path fill="currentColor" d="M12.545,10.239v3.821h5.445c-0.712,2.315-2.647,3.972-5.445,3.972c-3.332,0-6.033-2.701-6.033-6.032s2.701-6.032,6.033-6.032c1.498,0,2.866,0.549,3.921,1.453l2.814-2.814C17.503,2.988,15.139,2,12.545,2C7.021,2,2.543,6.477,2.543,12s4.478,10,10.002,10c8.396,0,10.249-7.85,9.426-11.748L12.545,10.239z"/></svg>
                  Continue with Google
               </button>
               
@@ -239,9 +242,16 @@ const AuthScreen = ({ onLogin }: { onLogin: () => void }) => {
               </div>
 
               <form onSubmit={handleMemberLogin} className="space-y-3">
-                 <input type="email" placeholder="EMAIL" value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-black border border-white/20 p-3 text-xs focus:border-white outline-none placeholder-gray-600"/>
-                 <input type="password" placeholder="PASSWORD" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-black border border-white/20 p-3 text-xs focus:border-white outline-none placeholder-gray-600"/>
-                 <button type="submit" disabled={isLoading} className="w-full py-3 bg-white text-black text-xs font-bold uppercase tracking-wider hover:bg-gray-200">
+                 <input type="email" placeholder="EMAIL" value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-black border border-white/20 p-3 text-xs focus:border-white outline-none placeholder-gray-600 text-white"/>
+                 <input type="password" placeholder="PASSWORD" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-black border border-white/20 p-3 text-xs focus:border-white outline-none placeholder-gray-600 text-white"/>
+                 
+                 <div className="flex justify-end">
+                    <button type="button" onClick={() => setView('FORGOT_PASSWORD')} className="text-[9px] text-gray-500 hover:text-white uppercase tracking-wider transition-colors">
+                       Forgot Password?
+                    </button>
+                 </div>
+
+                 <button type="submit" disabled={isLoading} className="w-full py-3 bg-white text-black text-xs font-bold uppercase tracking-wider hover:bg-gray-200 transition-colors">
                     {isLoading ? "Verifying..." : "Login"}
                  </button>
               </form>
@@ -252,12 +262,13 @@ const AuthScreen = ({ onLogin }: { onLogin: () => void }) => {
                  </button>
               </div>
 
-              {error && <div className="text-red-500 text-[10px] uppercase text-center">{error}</div>}
+              {error && <div className="text-red-500 text-[10px] uppercase text-center mt-2">{error}</div>}
+              {successMsg && <div className="text-green-500 text-[10px] uppercase text-center mt-2">{successMsg}</div>}
            </div>
         )}
 
         {view === 'REGISTER' && (
-            <div className="w-full space-y-4 animate-in fade-in zoom-in-95 duration-300 bg-[#111] p-8 border border-white/10">
+            <div className="w-full space-y-4 animate-in fade-in zoom-in-95 duration-300 bg-[#111] p-8 border border-white/10 shadow-2xl">
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-xs font-bold uppercase tracking-widest">New Architect</h2>
                     <button onClick={() => setView('SPLASH')} className="text-gray-500 hover:text-white" title="Back to Home"><X size={14}/></button>
@@ -281,10 +292,32 @@ const AuthScreen = ({ onLogin }: { onLogin: () => void }) => {
             </div>
         )}
 
+        {view === 'FORGOT_PASSWORD' && (
+            <div className="w-full space-y-4 animate-in fade-in zoom-in-95 duration-300 bg-[#111] p-8 border border-white/10 shadow-2xl">
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xs font-bold uppercase tracking-widest text-red-500 flex items-center gap-2">
+                       <KeyRound size={14} /> Recovery Protocol
+                    </h2>
+                    <button onClick={() => setView('MEMBER_LOGIN')} className="text-gray-500 hover:text-white" title="Back"><X size={14}/></button>
+                </div>
+                <p className="text-[10px] text-gray-400 mb-2 font-mono">
+                   Enter your registered email address to receive a secure password reset link.
+                </p>
+                <form onSubmit={handleForgotPassword} className="space-y-3">
+                    <input type="email" placeholder="EMAIL ADDRESS" value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-black border border-white/20 p-3 text-xs focus:border-white outline-none placeholder-gray-600 text-white"/>
+                    <button type="submit" disabled={isLoading} className="w-full py-3 bg-white text-black text-xs font-bold uppercase tracking-wider hover:bg-gray-200 transition-colors">
+                        {isLoading ? "Sending Protocol..." : "Send Reset Link"}
+                    </button>
+                </form>
+                {error && <div className="text-red-500 text-[10px] uppercase text-center mt-2">{error}</div>}
+                {successMsg && <div className="text-green-500 text-[10px] uppercase text-center mt-2">{successMsg}</div>}
+            </div>
+        )}
+
       </div>
       
       <div className="absolute bottom-6 text-[9px] text-gray-700 font-mono">
-         SYSTEM v4.2.0 // NO PATTERN
+         SYSTEM v4.2.0 // DUAL ENGINE
       </div>
     </div>
   );
@@ -293,6 +326,9 @@ const AuthScreen = ({ onLogin }: { onLogin: () => void }) => {
 const App: React.FC = () => {
   // --- AUTH STATE ---
   const { user, userProfile, loading: authLoading, logout } = useAuth();
+  
+  // --- GLOBAL STORE ---
+  const { savedModels, loadModels, selectedModelId, selectModel } = useAppStore();
 
   // --- APP STATE ---
   const [hasApiKey, setHasApiKey] = useState(false);
@@ -302,13 +338,13 @@ const App: React.FC = () => {
   
   // Storage State
   const [storageUsed, setStorageUsed] = useState(0);
-  const [savedModels, setSavedModels] = useState<SavedModel[]>([]);
-  const [selectedAgentModel, setSelectedAgentModel] = useState<SavedModel | null>(null);
-  const [isUploadingModel, setIsUploadingModel] = useState(false);
-  const [castingTab, setCastingTab] = useState<'AUTO' | 'AGENCY'>('AUTO');
   
-  // Brand & Vibe
+  // BRAND & IDENTITY
   const [brand, setBrand] = useState<BrandArchetype>(BrandArchetype.DE_ROCHE);
+  const [generationMode, setGenerationMode] = useState<'EDITORIAL' | 'CAMPAIGN'>('EDITORIAL');
+  const [deRocheLogo, setDeRocheLogo] = useState<UploadedFile | null>(null);
+  const [chaosLogo, setChaosLogo] = useState<UploadedFile | null>(null);
+  
   const [showVibeCheck, setShowVibeCheck] = useState(true);
 
   // Gallery Controls
@@ -325,7 +361,11 @@ const App: React.FC = () => {
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [isGettingInspiration, setIsGettingInspiration] = useState(false);
 
-  // Context & Config
+  // Casting & Config
+  const [castingTab, setCastingTab] = useState<'AUTO' | 'AGENCY'>('AUTO');
+  const [recruitingImage, setRecruitingImage] = useState<GeneratedImage | null>(null); 
+  const [tryOnImage, setTryOnImage] = useState<GeneratedImage | null>(null); 
+  
   const [learningContext, setLearningContext] = useState<string[]>([]);
   const [castGender, setCastGender] = useState('RANDOM');
   const [castVibe, setCastVibe] = useState('RANDOM');
@@ -333,8 +373,7 @@ const App: React.FC = () => {
   const [castFace, setCastFace] = useState('RANDOM');
   const [castDetails, setCastDetails] = useState('');
   
-  const [deRocheLogo, setDeRocheLogo] = useState<UploadedFile | null>(null);
-  const [chaosLogo, setChaosLogo] = useState<UploadedFile | null>(null);
+  // Chromatic Lab
   const [colorMode, setColorMode] = useState<'AUTO' | 'BRAND' | 'CUSTOM'>('AUTO');
   const [selectedColors, setSelectedColors] = useState<string[]>([]); 
   
@@ -345,8 +384,8 @@ const App: React.FC = () => {
   
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>(AspectRatio.PORTRAIT);
   const [resolution, setResolution] = useState<ImageResolution>(ImageResolution.RES_2K);
-  const [imageMode, setImageMode] = useState<ImageMode>(ImageMode.CINEMATIC);
-
+  
+  // Set Design
   const [environment, setEnvironment] = useState<string>(EnvironmentPreset.RANDOM);
   const [lighting, setLighting] = useState<string>(LightingPreset.RANDOM);
   const [framing, setFraming] = useState<string>(FramingPreset.RANDOM);
@@ -383,19 +422,55 @@ const App: React.FC = () => {
     }
   }, [userProfile]);
 
+  // --- HISTORY LOADING ---
+  const loadUserGenerations = useCallback(async () => {
+    if (!user) return;
+    try {
+      const assets = await fetchUserAssets(user.uid, 'generated_editorial');
+      const loadedImages: GeneratedImage[] = assets.map(asset => {
+         let prompt = asset.prompt || "";
+         if (!prompt && asset.aiSummary) {
+             const parts = asset.aiSummary.split('|');
+             if (parts.length > 0) prompt = parts[0].replace('Prompt:', '').trim();
+         }
+         
+         return {
+             id: asset.id,
+             url: asset.downloadUrl,
+             localUrl: asset.downloadUrl,
+             storagePath: asset.storagePath,
+             prompt: prompt || "Untitled Creation",
+             resolution: ImageResolution.RES_2K,
+             timestamp: asset.uploadedAt?.toMillis() || Date.now(),
+             brand: asset.brandArchetype || BrandArchetype.DE_ROCHE,
+             type: 'editorial',
+             rating: asset.rating || 0 
+         };
+      });
+      
+      if (loadedImages.length > 0) {
+          setGeneratedImages(loadedImages);
+      }
+    } catch (e) {
+      console.error("Failed to load history", e);
+    }
+  }, [user]);
+
   // --- STORAGE & MODELS UPDATE LOGIC ---
   const refreshStorageUsage = useCallback(async () => {
     if (user) {
       const usage = await getUserStorageUsage(user.uid);
       setStorageUsed(usage);
-      const models = await fetchMyModels(); // Corrected call with no args
-      setSavedModels(models);
+      await loadModels();
     }
-  }, [user]);
+  }, [user, loadModels]);
 
   useEffect(() => {
-    refreshStorageUsage();
-  }, [refreshStorageUsage]);
+    if (user) {
+        refreshStorageUsage();
+        loadUserGenerations();
+    }
+  }, [user, refreshStorageUsage, loadUserGenerations]);
 
   // --- GUEST SESSION PROTECTION ---
   useEffect(() => {
@@ -410,7 +485,7 @@ const App: React.FC = () => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [user]);
 
-  // --- STYLES ---
+  // --- DYNAMIC STYLES (DUAL CONCEPT RESTORED) ---
   const isDeRoche = brand === BrandArchetype.DE_ROCHE;
   const bgClass = isDeRoche ? 'bg-[#f4f4f4] text-[#111]' : 'bg-[#050505] text-[#C5A059]';
   const sidebarClass = isDeRoche ? 'bg-white border-r border-gray-200' : 'bg-[#0a0a0a] border-r border-[#C5A059]/30';
@@ -468,82 +543,49 @@ const App: React.FC = () => {
   // --- MODEL RECRUITMENT ---
   const handleSaveAsModel = async (image: GeneratedImage) => {
     if (!user) return;
-    try {
-        setLoadingStep("RECRUITING AGENT...");
-        setIsGenerating(true);
-        
-        let blob: Blob;
-        // Prefer localUrl (session blob) if available to avoid CORS
-        const sourceUrl = image.localUrl || image.url;
-
-        if (sourceUrl.startsWith('data:')) {
-             const arr = sourceUrl.split(',');
-             const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/png';
-             const bstr = atob(arr[1]);
-             let n = bstr.length;
-             const u8arr = new Uint8Array(n);
-             while (n--) u8arr[n] = bstr.charCodeAt(n);
-             blob = new Blob([u8arr], { type: mime });
-        } else {
-             try {
-                 // Try standard fetch first (works for same-origin blobs)
-                 const response = await fetch(sourceUrl, { mode: 'cors', credentials: 'omit' });
-                 if (!response.ok) throw new Error("Network fetch failed");
-                 blob = await response.blob();
-             } catch (fetchErr) {
-                 console.warn("Fetch failed, attempting canvas fallback", fetchErr);
-                 // Canvas Fallback for CORS opaque images (try anonymous)
-                 blob = await new Promise((resolve, reject) => {
-                     const img = new Image();
-                     img.crossOrigin = "Anonymous";
-                     img.onload = () => {
-                         const canvas = document.createElement('canvas');
-                         canvas.width = img.width;
-                         canvas.height = img.height;
-                         const ctx = canvas.getContext('2d');
-                         if(ctx) {
-                             ctx.drawImage(img, 0, 0);
-                             canvas.toBlob(b => b ? resolve(b) : reject(new Error("Canvas blob failed")), 'image/png');
-                         } else reject(new Error("No canvas context"));
-                     };
-                     img.onerror = () => reject(new Error("Image load failed due to CORS restrictions"));
-                     img.src = sourceUrl;
-                 });
-             }
-        }
-
-        await saveModelToAgency(blob, 'GENERATED');
-        await refreshStorageUsage(); 
-        alert("Agent Recruited Successfully");
-    } catch (e: any) {
-        console.error("Failed to save model", e);
-        alert("Failed to recruit agent. The image source may be restricted. Try downloading and re-uploading.");
-    } finally {
-        setIsGenerating(false);
-        setLoadingStep("");
-    }
+    setRecruitingImage(image);
   };
 
-  const handleModelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setIsUploadingModel(true);
-      try {
-        const file = e.target.files[0];
-        const newModel = await saveModelToAgency(file, 'UPLOADED');
-        await refreshStorageUsage();
-        setSelectedAgentModel(newModel);
-        setCastingTab('AGENCY');
-      } catch (error) {
-        console.error("Model upload failed", error);
-        alert("Failed to import model.");
-      } finally {
-        setIsUploadingModel(false);
+  const handleRecruitSuccess = async () => {
+      setRecruitingImage(null);
+      await loadModels(); // Update global store
+      await refreshStorageUsage();
+      setCastingTab('AGENCY'); 
+  };
+
+  const handleTryOnSuccess = async (newUrl: string) => {
+      if (!tryOnImage) return;
+      const newImage: GeneratedImage = {
+          ...tryOnImage,
+          id: generateId(),
+          url: newUrl,
+          localUrl: newUrl,
+          timestamp: Date.now(),
+          prompt: `VIRTUAL FITTING: ${tryOnImage.prompt}`,
+          type: 'editorial',
+          brand: tryOnImage.brand,
+          resolution: tryOnImage.resolution
+      };
+      setGeneratedImages(prev => [newImage, ...prev]);
+      
+      if (user) {
+          try {
+              const blob = await (await fetch(newUrl)).blob();
+              await uploadGeneratedAsset(user.uid, blob, newImage.prompt, brand);
+              refreshStorageUsage();
+          } catch(e) { console.error("Auto-save fit failed", e); }
       }
-    }
   };
 
-  const handleRateImage = useCallback((id: string, rating: number) => {
+  const handleRateImage = useCallback(async (id: string, rating: number) => {
     setGeneratedImages(prev => prev.map(img => img.id === id ? { ...img, rating } : img));
+    if (user) {
+        try {
+            await updateAssetRating(user.uid, id, rating);
+        } catch (e) {
+            console.error("Failed to save rating", e);
+        }
+    }
     if (rating >= 4) {
        setGeneratedImages(currentImages => {
            const img = currentImages.find(i => i.id === id);
@@ -558,7 +600,7 @@ const App: React.FC = () => {
            return currentImages;
        });
     }
-  }, []);
+  }, [user]);
 
   // --- FILTERED & SORTED VIEW ---
   const filteredAndSortedImages = useMemo(() => {
@@ -601,485 +643,473 @@ const App: React.FC = () => {
     setEnvironment(envs[Math.floor(Math.random() * envs.length)]); setLighting(lights[Math.floor(Math.random() * lights.length)]); setFraming(frames[Math.floor(Math.random() * frames.length)]);
     if (!isSeedLocked) setSeed(Math.random());
   };
-  const generateCasting = () => { const getRandom = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)]; setCastGender(getRandom(CASTING_GENDERS)); setCastVibe(getRandom(CASTING_VIBES)); setCastHair(getRandom(CASTING_HAIR)); setCastFace(getRandom(CASTING_FACE)); setSelectedAgentModel(null); };
   const handleGetInspiration = async () => { setIsGettingInspiration(true); try { const castingStr = `Gender: ${castGender}, Vibe: ${castVibe}`; const { concept } = await generateCreativePrompt(brand, castingStr); setPromptOverride(concept); return concept; } catch (e) { console.error(e); return ""; } finally { setIsGettingInspiration(false); } };
-  const handleEnhance = async (currentPrompt: string) => { if (!currentPrompt) return ""; setIsEnhancing(true); try { const result = await enhancePrompt(currentPrompt, brand); if (result.suggestedScene) { if (result.suggestedScene.environment && result.suggestedScene.environment !== 'Random') setEnvironment(result.suggestedScene.environment); if (result.suggestedScene.lighting && result.suggestedScene.lighting !== 'Random') setLighting(result.suggestedScene.lighting); if (result.suggestedScene.framing && result.suggestedScene.framing !== 'Full Body') setFraming(result.suggestedScene.framing); } return result.improvedPrompt; } catch (e: any) { console.error("Enhance failed", e); return ""; } finally { setIsEnhancing(false); } };
+  const handleEnhance = async (currentPrompt: string) => { if (!currentPrompt) return ""; setIsEnhancing(true); try { const result = await enhancePrompt(currentPrompt, brand); if (result.suggestedScene) { if (result.suggestedScene.environment) setEnvironment(result.suggestedScene.environment); if (result.suggestedScene.lighting) setLighting(result.suggestedScene.lighting); if (result.suggestedScene.framing) setFraming(result.suggestedScene.framing); } return result.improvedPrompt || ""; } catch (e) { console.error(e); return ""; } finally { setIsEnhancing(false); } };
   
+  // --- CORE GENERATION FUNCTION ---
   const handleGenerate = async (finalPrompt: string) => {
-    if (!finalPrompt && uploadedFiles.length === 0) return;
+    if (!finalPrompt.trim() && uploadedFiles.length === 0) {
+      alert("Please enter a concept or upload reference images.");
+      return;
+    }
+    
+    if (user && storageUsed >= STORAGE_LIMIT) {
+       alert(`Storage Limit Reached (${formatBytes(storageUsed)} / 5GB). Please delete old assets.`);
+       return;
+    }
+
     setIsGenerating(true);
-    setLoadingStep("ANALYZING BRIEF...");
+    setLoadingStep('INITIALIZING');
 
-    const steps = ["CASTING MODEL...", "CONSTRUCTING SCENE...", "STYLING LOOK...", "RENDERING LIGHT...", "DEVELOPING FILM..."];
-    let stepIdx = 0;
-    const interval = setInterval(() => {
-        if (stepIdx < steps.length) {
-            setLoadingStep(steps[stepIdx]);
-            stepIdx++;
+    // 1. CASTING & SCENE
+    const castingDetails = `Gender: ${castGender}, Vibe: ${castVibe}, Hair: ${castHair}, Face: ${castFace}. ${castDetails}`;
+    
+    let effectiveCasting = castingDetails;
+    let referenceModelUrl = undefined;
+    
+    if (castingTab === 'AGENCY' && selectedModelId) {
+        const model = savedModels.find(m => m.id === selectedModelId);
+        if (model) {
+            setLoadingStep('LOCKING IDENTITY');
+            effectiveCasting = `IDENTITY LOCK: ${model.name}. ${model.biometricData ? 'BIOMETRICS APPLIED.' : ''}`;
+            referenceModelUrl = model.url;
         }
-    }, 2500);
+    }
 
-    const currentSeed = isSeedLocked ? seed : Math.random();
+    // 2. SCENE COMPOSITION
+    let scenePrompt = "";
+    if (customScenePrompt) {
+        scenePrompt = customScenePrompt;
+    } else {
+        scenePrompt = `Environment: ${environment}. Lighting: ${lighting}. Framing: ${framing}.`;
+    }
+
+    // 3. COLOR PALETTE
+    let colorPrompt = "";
+    if (colorMode === 'BRAND') {
+        const palettes = BRAND_RECIPES[brand];
+        const randomPalette = palettes[Math.floor(Math.random() * palettes.length)];
+        colorPrompt = `Color Palette: ${randomPalette.name} (${randomPalette.colors.join(', ')}).`;
+    } else if (colorMode === 'CUSTOM') {
+        const activeColors = selectedColors.filter(c => c);
+        if (activeColors.length > 0) colorPrompt = `Color Palette: ${activeColors.join(', ')}.`;
+    }
+
+    // 4. LEARNING CONTEXT
+    let contextPrompt = "";
+    if (learningContext.length > 0) {
+        contextPrompt = `Style Reference History: ${learningContext.join(' | ')}.`;
+    }
 
     try {
-      let builtCasting = ""; 
-      // Only include physical attributes if NO agent model is selected
-      // If an agent model IS selected, we don't want "shaved head" text clashing with a "long hair" image.
-      if (!selectedAgentModel) {
-          if (castGender !== 'RANDOM') builtCasting += `CASTING: ${castGender}. `; 
-          if (castHair !== 'RANDOM') builtCasting += `HAIR: ${castHair}. `; 
-          if (castFace !== 'RANDOM') builtCasting += `FACE: ${castFace}. `; 
-      }
+      setLoadingStep('FABRICATING');
       
-      // Vibe and Details are modifiers that can apply to a visual reference too (e.g. expression)
-      if (castVibe !== 'RANDOM') builtCasting += `VIBE: ${castVibe.toUpperCase()}. `; 
-      if (castDetails) builtCasting += `DETAILS: ${castDetails}.`;
+      // Determine Logo based on ACTIVE BRAND
+      let logoToUse = null;
+      if (brand === BrandArchetype.DE_ROCHE && deRocheLogo) logoToUse = deRocheLogo.base64;
+      if (brand === BrandArchetype.CHAOSCHICC && chaosLogo) logoToUse = chaosLogo.base64;
 
-      let activePalette = undefined; 
-      let activeHexColors = undefined;
-      if (colorMode !== 'AUTO') { 
-          const validColors = selectedColors.filter(c => c && c.trim() !== ''); 
-          if (validColors.length > 0) { 
-              activePalette = validColors.join(', '); 
-              activeHexColors = validColors; 
-          } 
-      }
-
-      const tempImages = await generateEditorialImages({
+      const newImageUrls = await generateEditorialImages({
         prompt: finalPrompt,
         uploadedFiles,
         resolution,
         aspectRatio,
         brand,
-        environment,
-        lighting,
-        framing,
-        customScenePrompt,
-        seed: currentSeed,
-        modelPrompt: builtCasting || undefined,
-        colorPalette: activePalette,
-        customHexColors: activeHexColors,
-        sourceFidelity: sourceFidelity,
-        sourceInterpretation: sourceInterpretation,
-        logoBase64: (brand === BrandArchetype.DE_ROCHE ? deRocheLogo?.base64 : chaosLogo?.base64),
-        locationQuery: useGrounding ? finalPrompt : undefined,
-        sourceMaterialPrompt,
+        modelPrompt: effectiveCasting,
+        logoBase64: logoToUse || undefined,
+        environment: environment,
+        lighting: lighting,
+        framing: framing,
+        colorPalette: colorPrompt,
+        customScenePrompt: customScenePrompt,
+        seed: isSeedLocked ? seed : Math.random(),
         learningContext: learningContext,
-        imageMode: imageMode,
-        referenceModelUrl: selectedAgentModel?.url 
+        sourceInterpretation: sourceInterpretation,
+        sourceMaterialPrompt: sourceMaterialPrompt,
+        sourceFidelity: sourceFidelity,
+        referenceModelUrl: referenceModelUrl,
+        locationQuery: useGrounding ? finalPrompt : undefined,
+        imageMode: generationMode === 'CAMPAIGN' ? ImageMode.LOOKBOOK : ImageMode.CINEMATIC
       });
 
-      let savedImages: GeneratedImage[] = [];
-
+      const newImages: GeneratedImage[] = newImageUrls.map(url => ({
+        id: generateId(),
+        url,
+        localUrl: url,
+        prompt: finalPrompt,
+        modelPrompt: effectiveCasting,
+        resolution,
+        timestamp: Date.now(),
+        brand,
+        type: 'editorial',
+        environment: environment,
+        lighting: lighting,
+        framing: framing,
+        lookData: {
+            id: generateId(),
+            season: 'SS25',
+            number: 1,
+            coreItem: finalPrompt.split(' ')[0] || 'Garment',
+            silhouette: 'Tailored',
+            material: 'Cotton',
+            vibe: castVibe,
+            status: 'GENERATED'
+        }
+      }));
+      
+      setGeneratedImages(prev => [...newImages, ...prev]);
+      
       if (user) {
-          setLoadingStep("ARCHIVING ASSETS...");
-          savedImages = await Promise.all(tempImages.map(async (tempUrl) => {
-              try {
-                  const response = await fetch(tempUrl);
-                  const blob = await response.blob();
-                  const savedAsset = await uploadGeneratedAsset(user.uid, blob, finalPrompt, brand);
-                  return {
-                      id: savedAsset.id,
-                      url: savedAsset.downloadUrl,
-                      localUrl: tempUrl, // KEEP SESSION BLOB FOR CORS-FREE OPERATIONS
-                      prompt: finalPrompt,
-                      resolution,
-                      timestamp: Date.now(),
-                      brand,
-                      type: 'editorial',
-                      mode: imageMode,
-                      seed: currentSeed
-                  };
-              } catch (e) {
-                  return { id: generateId(), url: tempUrl, localUrl: tempUrl, prompt: finalPrompt, resolution, timestamp: Date.now(), brand, type: 'editorial', mode: imageMode, seed: currentSeed };
-              }
-          }));
-          refreshStorageUsage(); 
-      } else {
-          savedImages = tempImages.map(url => ({ id: generateId(), url, localUrl: url, prompt: finalPrompt, resolution, timestamp: Date.now(), brand, type: 'editorial', mode: imageMode, seed: currentSeed }));
+         setLoadingStep('ARCHIVING');
+         for (const img of newImages) {
+             const blob = await (await fetch(img.url)).blob();
+             await uploadGeneratedAsset(user.uid, blob, finalPrompt, brand);
+         }
+         refreshStorageUsage();
       }
 
-      setGeneratedImages(prev => [...savedImages, ...prev]);
-
-    } catch (error: any) {
-        alert("Generation failed: " + error.message);
+    } catch (error) {
+      console.error("Generation failed", error);
+      alert("Generation failed. Please try again.");
     } finally {
-      clearInterval(interval);
       setIsGenerating(false);
-      setLoadingStep("");
+      setLoadingStep('');
     }
   };
 
-  const handleUpdateImage = (id: string, newUrl: string) => { setGeneratedImages(prev => prev.map(img => { if (img.id === id) { if (img.url !== newUrl && img.url.startsWith('blob:')) { URL.revokeObjectURL(img.url); } return { ...img, url: newUrl, localUrl: newUrl }; } return img; })); };
-  const handleAddSketch = (originalImage: GeneratedImage, sketchUrl: string) => { const sketchImage: GeneratedImage = { ...originalImage, id: generateId(), url: sketchUrl, localUrl: sketchUrl, prompt: `Technical Sketch of ${originalImage.prompt}`, type: 'editorial' }; setGeneratedImages(prev => [sketchImage, ...prev]); };
-  const handleEditImage = async (id: string, editPrompt: string): Promise<string> => {
-    const img = generatedImages.find(i => i.id === id);
-    if (!img) throw new Error("Image not found");
-    const newUrl = await editGeneratedImage(img.url, editPrompt);
-    if (user) { (async () => { try { const blob = await (await fetch(newUrl)).blob(); await uploadFile(user.uid, blob, `edit_${id}_${Date.now()}.png`, 'generated_editorial', { prompt: `EDIT: ${editPrompt} | REF: ${img.prompt}`, brand: img.brand }, id); refreshStorageUsage(); } catch(e) { console.error("Auto-save edit failed", e); } })(); }
-    return newUrl;
+  // --- ACTIONS ---
+  const handleUpdateImage = (id: string, newUrl: string) => {
+    setGeneratedImages(prev => prev.map(img => img.id === id ? { ...img, url: newUrl } : img));
+  };
+  
+  const handleAddSketch = (originalImage: GeneratedImage, sketchUrl: string) => {
+     const sketchImage: GeneratedImage = {
+         ...originalImage,
+         id: generateId(),
+         url: sketchUrl,
+         prompt: `TECHNICAL SKETCH: ${originalImage.prompt}`,
+         type: 'editorial',
+         timestamp: Date.now()
+     };
+     setGeneratedImages(prev => [sketchImage, ...prev]);
   };
 
-  const triggerTechPack = async (image: GeneratedImage) => { setIsGeneratingTechPack(true); try { const tp = await generateTechPack(image.url); setTechPack(tp); setShowTechPackModal(true); } catch (e) { console.error(e); alert("Failed"); } finally { setIsGeneratingTechPack(false); } };
-  const triggerMarketing = async (image: GeneratedImage) => { setIsMarketingLoading(true); setShowMarketingModal(true); try { const strategy = await generateMarketingStrategy(image.brand, []); setMarketingStrategy(strategy); } catch (e) { console.error(e); setShowMarketingModal(false); } finally { setIsMarketingLoading(false); } };
-  const triggerVideo = async (image: GeneratedImage) => { setIsGeneratingVideo(true); try { const videoUrl = await generateVideo(image.url, image.prompt, image.brand); setGeneratedImages(prev => prev.map(img => img.id === image.id ? { ...img, videoUrl } : img)); } catch (e) { console.error(e); alert("Failed"); } finally { setIsGeneratingVideo(false); } };
-  const triggerVariations = async (image: GeneratedImage) => {
-    setIsGeneratingVariations(true);
-    try {
-        const vars = await generateVariations(image.url, image.prompt, image.brand);
-        const newImages = vars.map(url => ({ ...image, id: generateId(), url, localUrl: url, timestamp: Date.now() }));
-        setGeneratedImages(prev => [...newImages, ...prev]);
-        if (user) { await Promise.all(newImages.map(async (img) => { try { const blob = await (await fetch(img.url)).blob(); await uploadFile(user.uid, blob, `var_${img.id}.png`, 'generated_editorial', { prompt: `VARIATION: ${img.prompt}`, brand: img.brand }, img.id); } catch(e) { console.error("Auto-save var failed", e); } })); refreshStorageUsage(); }
-    } catch (e) { console.error(e); alert("Failed"); } finally { setIsGeneratingVariations(false); }
+  const handleEditStart = async (id: string, prompt: string) => {
+     const img = generatedImages.find(i => i.id === id);
+     if (!img) throw new Error("Image not found");
+     return await editGeneratedImage(img.url, prompt, img.storagePath);
   };
-  const triggerSimulateFabric = async (image: GeneratedImage, fabricDesc: string) => { setIsSimulatingFabric(true); try { const videoUrl = await simulateFabricMovement(image.url, image.prompt, image.brand, fabricDesc); setGeneratedImages(prev => prev.map(img => img.id === image.id ? { ...img, videoUrl } : img)); } catch (e) { console.error(e); alert("Failed"); } finally { setIsSimulatingFabric(false); } };
-  const handleIterationTrigger = async (mode: 'EVOLVE' | 'MUTATE' | 'BREAK') => {
-      if (!selectedImageId) return;
-      const originalImage = generatedImages.find(i => i.id === selectedImageId);
-      if (!originalImage) return;
-      setIsIterating(true);
+  
+  const handleGenerateVariations = async (image: GeneratedImage) => {
+      setIsGeneratingVariations(true);
       try {
-          const images = await generateEditorialImages({
-            prompt: `${originalImage.prompt}.`, uploadedFiles: [], resolution: originalImage.resolution, aspectRatio: AspectRatio.PORTRAIT, brand: originalImage.brand,
-            environment: environment, lighting: lighting, framing: framing, seed: Math.random(), iterationMode: mode, referenceImageId: originalImage.id
-          });
-          const newImages: GeneratedImage[] = images.map(url => ({ id: generateId(), url, localUrl: url, prompt: `Iteration (${mode}): ${originalImage.prompt}`, resolution: originalImage.resolution, timestamp: Date.now(), brand: originalImage.brand, type: 'editorial' }));
-          setGeneratedImages((prev) => [...newImages, ...prev]);
-          if (user) { await Promise.all(newImages.map(async (img) => { try { const blob = await (await fetch(img.url)).blob(); await uploadFile(user.uid, blob, `iter_${img.id}.png`, 'generated_editorial', { prompt: img.prompt, brand: img.brand, notes: `Iteration Mode: ${mode}` }, img.id); } catch(e) { console.error("Auto-save iteration failed", e); } })); refreshStorageUsage(); }
-      } catch (e: any) { console.error(e); } finally { setIsIterating(false); }
+          const urls = await generateVariations(image.url, image.prompt, image.brand, image.storagePath);
+          const newImages = urls.map(u => ({
+              ...image,
+              id: generateId(),
+              url: u,
+              timestamp: Date.now(),
+              prompt: `VARIATION: ${image.prompt}`
+          }));
+          setGeneratedImages(prev => [...newImages, ...prev]);
+      } catch (e) {
+          console.error(e);
+          alert("Failed to generate variations");
+      } finally {
+          setIsGeneratingVariations(false);
+      }
   };
 
-  const handleDownloadImage = async (image: GeneratedImage) => {
-    if (!user) {
-      const link = document.createElement('a'); link.href = image.url; link.download = `lumiere-${image.id}.png`; document.body.appendChild(link); link.click(); document.body.removeChild(link); return;
+  const handleGenerateVideo = async (image: GeneratedImage) => {
+      setIsGeneratingVideo(true);
+      try {
+          const videoUrl = await generateVideo(image.url, image.prompt, image.brand, image.storagePath);
+          setGeneratedImages(prev => prev.map(img => img.id === image.id ? { ...img, videoUrl } : img));
+      } catch (e) {
+          console.error(e);
+          alert("Failed to generate video");
+      } finally {
+          setIsGeneratingVideo(false);
+      }
+  };
+  
+  const handleSimulateFabric = async (image: GeneratedImage, fabric: string) => {
+      setIsSimulatingFabric(true);
+      try {
+          const videoUrl = await simulateFabricMovement(image.url, image.prompt, image.brand, fabric, image.storagePath);
+          setGeneratedImages(prev => prev.map(img => img.id === image.id ? { ...img, videoUrl } : img));
+      } catch (e) {
+          console.error(e);
+          alert("Failed to simulate fabric");
+      } finally {
+          setIsSimulatingFabric(false);
+      }
+  };
+
+  const handleMarketingStrategy = async (image: GeneratedImage) => {
+    setIsMarketingLoading(true);
+    setShowMarketingModal(true);
+    try {
+        const strategy = await generateMarketingStrategy(image.brand, [{ 
+            id: image.id, 
+            base64: await getBase64FromUrl(image.url, image.storagePath).then(r => r.base64), 
+            mimeType: 'image/png', 
+            file: new File([], 'placeholder'), 
+            previewUrl: '', 
+            category: 'reference' 
+        }]);
+        setMarketingStrategy(strategy);
+    } catch (e) {
+        console.error(e);
+    } finally {
+        setIsMarketingLoading(false);
     }
-    try { const url = await getAssetDownloadUrl(user.uid, image.id); window.open(url, '_blank'); } catch (e) { console.error("Download failed", e); const link = document.createElement('a'); link.href = image.url; link.download = `lumiere-${image.id}.png`; document.body.appendChild(link); link.click(); document.body.removeChild(link); }
   };
 
-  const handleStudioApply = async (prompt: string) => { if (!selectedImageId) return; setIsGenerating(true); try { const newUrl = await handleEditImage(selectedImageId, prompt); handleUpdateImage(selectedImageId, newUrl); setShowStudio(false); } catch (e: any) { console.error(e); } finally { setIsGenerating(false); } };
-  const renderSelectInput = (label: string, value: string, setValue: (val: string) => void, options: string[], placeholder: string) => { const isCustom = !options.includes(value) && value !== 'RANDOM'; return ( <div className="relative group mb-2"> {isCustom ? ( <div className="relative animate-in fade-in duration-200"> <input type="text" value={value} onChange={(e) => setValue(e.target.value)} placeholder={placeholder} autoFocus className={`w-full p-2 pr-8 text-[10px] border rounded-sm outline-none font-mono ${inputClass}`} /> <button onClick={() => setValue('RANDOM')} className={`absolute right-2 top-1/2 -translate-y-1/2 hover:scale-110 transition-transform ${textAccent}`} title="Reset to Random"><X size={12} /></button> </div> ) : ( <> <select value={value} onChange={(e) => { if (e.target.value === 'CUSTOM_INPUT') { setValue(''); } else { setValue(e.target.value); } }} className={`w-full p-2 text-[10px] border rounded-sm outline-none appearance-none cursor-pointer font-mono uppercase ${inputClass}`}> <option value="RANDOM" className="bg-[#111] text-gray-500">[ RANDOM {label.toUpperCase()} ]</option> {options.map((opt) => (<option key={opt} value={opt} className="bg-[#111] text-white">{opt}</option>))} <option value="CUSTOM_INPUT" className="bg-[#111] text-[#C5A059] font-bold tracking-widest">:: CUSTOM ::</option> </select> <ChevronDown size={12} className={`absolute right-2 top-1/2 -translate-y-1/2 opacity-50 group-hover:opacity-100 transition-opacity pointer-events-none ${textAccent}`} /> </> )} </div> ); };
-  const renderSceneSelect = (label: string, value: string, setValue: (val: string) => void, enumObj: any, placeholder: string) => { const options = Object.values(enumObj).filter((k: any) => k !== 'RANDOM') as string[]; return renderSelectInput(label, value, setValue, options, placeholder); };
+  const handleGenerateTechPack = async (image: GeneratedImage) => {
+    setIsGeneratingTechPack(true);
+    setShowTechPackModal(true);
+    try {
+       const pack = await generateTechPack(image.url, image.storagePath);
+       setTechPack(pack);
+    } catch (e) {
+       console.error(e);
+       alert("Failed to generate Tech Pack");
+       setShowTechPackModal(false);
+    } finally {
+       setIsGeneratingTechPack(false);
+    }
+  };
 
-  if (authLoading) return <div className="flex items-center justify-center h-screen w-full bg-[#050505]"><Loader2 className="animate-spin text-[#C5A059]" size={32} /></div>;
-  if (!user) return <AuthScreen onLogin={() => {}} />;
+  if (!user && authLoading) {
+      return (
+          <div className="min-h-screen bg-black flex items-center justify-center text-white">
+              <Loader2 className="animate-spin" />
+          </div>
+      );
+  }
+
+  if (!user && !authLoading) {
+     return <AuthScreen onLogin={() => {}} />;
+  }
+
+  if (user && !userProfile) {
+     return <div className="min-h-screen bg-black flex items-center justify-center text-white"><Loader2 className="animate-spin"/> Syncing Profile...</div>;
+  }
+
+  if (showVibeCheck && userProfile && !userProfile.isGuest && userProfile.createdAt && (Date.now() - userProfile.createdAt.toMillis() < 60000)) {
+     return <VibeCheck onClose={() => setShowVibeCheck(false)} onComplete={async (b) => {
+         setBrand(b);
+         if (user) await updateUserProfile(user.uid, { brandArchetype: b });
+     }} />;
+  }
+
+  const selectedImage = generatedImages.find(img => img.id === selectedImageId) || null;
+  const comparisonImage = generatedImages.find(img => img.id === comparisonImageId) || null;
 
   return (
-    <div className={`flex h-screen w-full overflow-hidden ${bgClass} font-sans selection:bg-pink-500 selection:text-white`}>
+    <div className={`min-h-screen w-full flex font-mono transition-colors duration-500 ${bgClass} ${textAccent}`}>
       
-      {/* 1. LEFT SIDEBAR */}
-      <aside className={`w-[340px] flex-shrink-0 flex flex-col h-full overflow-y-auto custom-scrollbar z-20 ${sidebarClass} transition-colors duration-500`}>
-        <div className="p-6 space-y-8 pb-32">
-          
-          {/* STORAGE LOADER */}
-          <div className="mb-2">
-             <div className="flex justify-between items-end mb-2">
-                <div className="flex items-center gap-2 text-[9px] font-bold uppercase tracking-widest opacity-60">
-                   <HardDrive size={10} />
-                   <span>Storage</span>
-                </div>
-                <div className="text-[9px] font-mono">
-                   {formatBytes(storageUsed)} <span className="opacity-50">/ 5 GB</span>
-                </div>
-             </div>
-             <div className={`h-1 w-full rounded-full ${isDeRoche ? 'bg-gray-200' : 'bg-gray-800'}`}>
-                <div 
-                   className={`h-full rounded-full transition-all duration-500 ${isDeRoche ? 'bg-black' : 'bg-[#C5A059]'}`}
-                   style={{ width: `${Math.min((storageUsed / STORAGE_LIMIT) * 100, 100)}%` }}
-                ></div>
-             </div>
-          </div>
-
-          {/* HEADER */}
-          <div>
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <h1 className={`text-3xl font-black uppercase tracking-tighter leading-none mb-1 ${textAccent} font-header`}>Lumière</h1>
-                <p className="text-[9px] font-mono opacity-60 uppercase tracking-widest">{userProfile?.displayName || user.displayName || 'Architect'}</p>
-              </div>
-              <button onClick={() => setShowProfileModal(true)} className={`w-8 h-8 flex items-center justify-center border rounded-full transition-colors ${isDeRoche ? 'border-black hover:bg-black hover:text-white' : 'border-[#C5A059] hover:bg-[#C5A059] hover:text-black'}`}>
-                {user.photoURL ? <img src={user.photoURL} alt="User" className="w-full h-full rounded-full object-cover" /> : <Settings size={14} />}
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-2 mb-6">
-              <button onClick={() => setBrand(BrandArchetype.DE_ROCHE)} className={`py-3 px-2 text-[10px] font-bold uppercase tracking-widest border transition-all ${brand === BrandArchetype.DE_ROCHE ? 'bg-black text-white border-black' : 'bg-transparent text-gray-400 border-gray-200 hover:border-gray-400'}`}>De Roche</button>
-              <button onClick={() => setBrand(BrandArchetype.CHAOSCHICC)} className={`py-3 px-2 text-[10px] font-bold uppercase tracking-widest border transition-all ${brand === BrandArchetype.CHAOSCHICC ? 'bg-[#C5A059] text-black border-[#C5A059]' : 'bg-transparent text-gray-400 border-[#C5A059]/30 hover:border-[#C5A059]'}`}>ChaosChicc</button>
-            </div>
-          </div>
-
-          {/* SECTION 1: SCENE DIRECTOR */}
-          <section>
-             <div className={labelClass}>
-               <div className="flex items-center gap-2"><Camera size={12} /> <span>Scene Director</span></div>
-               <div className="flex gap-1">
-                 <button onClick={() => setIsSeedLocked(!isSeedLocked)} className="hover:opacity-100 opacity-50">{isSeedLocked ? <Lock size={12} /> : <Unlock size={12} />}</button>
-                 <button onClick={randomizeScene} className="hover:opacity-100 opacity-50"><Dice5 size={12} /></button>
-               </div>
-             </div>
-             <div className="space-y-1">
-                {renderSceneSelect("Environment", environment, setEnvironment, EnvironmentPreset, "e.g. Cyberpunk Alleyway...")}
-                {renderSceneSelect("Lighting", lighting, setLighting, LightingPreset, "e.g. Neon Strobe...")}
-                {renderSceneSelect("Framing", framing, setFraming, FramingPreset, "e.g. Dutch Angle...")}
-                <div className="relative mt-2">
-                   <div className="absolute left-2 top-1/2 -translate-y-1/2 opacity-50"><Type size={10} /></div>
-                   <input type="text" value={customScenePrompt} onChange={(e) => setCustomScenePrompt(e.target.value)} placeholder="ADDITIONAL DIRECTOR NOTES..." className={`w-full py-2 pl-6 pr-2 text-[10px] border-b bg-transparent rounded-none focus:outline-none placeholder-opacity-50 ${isDeRoche ? 'border-gray-300 text-black placeholder-gray-400' : 'border-[#C5A059]/30 text-[#C5A059] placeholder-[#C5A059]/30'}`} />
-                </div>
-             </div>
-          </section>
-          
-          {/* SECTION 2: BRAND DNA */}
-          <section>
-             <div className={labelClass}><div className="flex items-center gap-2"><Hexagon size={12} /> <span>Brand DNA (Logos)</span></div></div>
-             <div className="grid grid-cols-2 gap-3">
-               <label className={`block w-full aspect-square border border-dashed rounded flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-white/5 ${inputClass}`}>{deRocheLogo ? <img src={deRocheLogo.previewUrl} className="w-full h-full object-contain p-2" /> : <span className="text-[9px] opacity-50">+ DE ROCHE</span>}<input type="file" accept="image/*" className="hidden" onChange={(e) => handleLogoUpload(e, BrandArchetype.DE_ROCHE)} /></label>
-               <label className={`block w-full aspect-square border border-dashed rounded flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-white/5 ${inputClass}`}>{chaosLogo ? <img src={chaosLogo.previewUrl} className="w-full h-full object-contain p-2" /> : <span className="text-[9px] opacity-50">+ CHAOS</span>}<input type="file" accept="image/*" className="hidden" onChange={(e) => handleLogoUpload(e, BrandArchetype.CHAOSCHICC)} /></label>
-             </div>
-          </section>
-
-          {/* SECTION 3: CHROMATICS ENGINE */}
-          <section>
-            <div className={labelClass}><div className="flex items-center gap-2"><Palette size={12} /> <span>Chromatics Engine</span></div></div>
-            <div className="flex gap-1 mb-3">{(['AUTO', 'BRAND', 'CUSTOM'] as const).map(mode => (<button key={mode} onClick={() => { setColorMode(mode); if(mode === 'AUTO') setSelectedColors([]); }} className={`flex-1 py-2 text-[8px] uppercase font-bold tracking-wider border rounded-sm transition-all ${colorMode === mode ? (isDeRoche ? 'bg-black text-white border-black' : 'bg-[#C5A059] text-black border-[#C5A059]') : (isDeRoche ? 'text-gray-400 border-gray-300 hover:bg-gray-100' : 'text-gray-500 border-gray-800 hover:text-[#C5A059]')}`}>{mode}</button>))}</div>
-            <div className={`p-4 border rounded relative transition-all ${isDeRoche ? 'border-[#232222] bg-gray-50' : 'border-[#C5A059]/30 bg-black/40'}`}>
-                {colorMode === 'AUTO' && (<div className="flex flex-col items-center justify-center h-20 opacity-50 text-center gap-2"><Sparkles size={16} /><p className="text-[9px] uppercase tracking-wider">AI will determine palette based on {brand} logic.</p></div>)}
-                {colorMode === 'BRAND' && (<div className="space-y-3"><p className="text-[9px] uppercase tracking-widest opacity-50 mb-2 font-bold">Select {brand} Recipe:</p><div className="space-y-2">{(BRAND_RECIPES[brand] || []).map((recipe) => (<button key={recipe.name} onClick={() => setSelectedColors(recipe.colors)} className={`w-full flex items-center justify-between p-2 rounded border transition-all ${JSON.stringify(selectedColors) === JSON.stringify(recipe.colors) ? (isDeRoche ? 'border-black bg-white' : 'border-[#C5A059] bg-[#C5A059]/10') : 'border-transparent hover:bg-black/5'}`}><span className="text-[9px] font-bold uppercase">{recipe.name}</span><div className="flex gap-1">{recipe.colors.map(c => (<div key={c} className="w-4 h-4 rounded-full border border-white/20" style={{ backgroundColor: c }}></div>))}</div></button>))}</div></div>)}
-                {colorMode === 'CUSTOM' && (<div className="space-y-4"><div><p className="text-[9px] uppercase tracking-widest opacity-50 mb-2 font-bold">Active Slots (Max 3):</p><div className="flex justify-between gap-2">{[0, 1, 2].map((i) => (<div key={i} className="flex-1 flex flex-col gap-1"><div className="relative w-full aspect-square border border-dashed rounded flex items-center justify-center overflow-hidden hover:border-solid transition-colors group" style={{ borderColor: isDeRoche ? '#ccc' : '#333', backgroundColor: (selectedColors && selectedColors[i]) ? selectedColors[i] : 'transparent' }}>{(selectedColors && selectedColors[i]) ? (<div className="w-full h-full relative group"><button onClick={() => handleColorRemove(i)} className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity text-white"><X size={12} /></button></div>) : (<Plus size={12} className="opacity-20 group-hover:opacity-50" />)}{!(selectedColors && selectedColors[i]) && (<input type="color" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleColorAdd(e.target.value, i)} />)}</div><div className="text-[8px] font-mono text-center opacity-50 uppercase truncate">{(selectedColors && selectedColors[i]) ? selectedColors[i] : 'EMPTY'}</div></div>))}</div></div><div><p className="text-[9px] uppercase tracking-widest opacity-50 mb-2 font-bold">Quick Swatches (Pantone):</p><div className="flex gap-2 flex-wrap">{BRAND_PANTONES[brand].map((p) => (<button key={p.name} onClick={() => { const emptyIndex = selectedColors.findIndex(c => !c || c === ''); if (emptyIndex !== -1) { handleColorAdd(p.hex, emptyIndex); } else if (selectedColors.length < 3) { setSelectedColors([...selectedColors, p.hex]); } else { handleColorAdd(p.hex, 2); } }} className="w-8 h-8 rounded-full border border-white/20 transition-transform hover:scale-110 relative group" style={{ backgroundColor: p.hex }} title={p.name}><div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-black text-white text-[8px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap z-10 pointer-events-none">{p.name}</div></button>))}</div></div></div>)}
-            </div>
-          </section>
-
-          {/* SECTION 4: CASTING & AGENCY (UPDATED TABBED VIEW) */}
-          <section>
-             <div className={labelClass}>
-                <div className="flex items-center gap-2"><Users size={12} /> <span>Casting Director</span></div>
-             </div>
-             
-             {/* TABS */}
-             <div className="flex gap-1 mb-3">
-               <button 
-                 onClick={() => { setCastingTab('AUTO'); setSelectedAgentModel(null); }}
-                 className={`flex-1 py-2 text-[8px] uppercase font-bold tracking-wider border rounded-sm transition-all ${castingTab === 'AUTO' ? (isDeRoche ? 'bg-black text-white border-black' : 'bg-[#C5A059] text-black border-[#C5A059]') : 'opacity-50 border-transparent hover:opacity-100'}`}
-               >
-                 <RefreshCw size={10} className="inline mr-1"/> Auto-Cast
-               </button>
-               <button 
-                 onClick={() => setCastingTab('AGENCY')}
-                 className={`flex-1 py-2 text-[8px] uppercase font-bold tracking-wider border rounded-sm transition-all ${castingTab === 'AGENCY' ? (isDeRoche ? 'bg-black text-white border-black' : 'bg-[#C5A059] text-black border-[#C5A059]') : 'opacity-50 border-transparent hover:opacity-100'}`}
-               >
-                 <Star size={10} className="inline mr-1"/> Agency ({savedModels.length})
-               </button>
-             </div>
-
-             {castingTab === 'AGENCY' ? (
-               <div className={`p-3 border rounded-sm ${isDeRoche ? 'bg-gray-100 border-gray-300' : 'bg-black/40 border-[#C5A059]/30'}`}>
-                  <div className="grid grid-cols-3 gap-2 mb-3 max-h-40 overflow-y-auto custom-scrollbar">
-                    {/* UPLOAD BUTTON */}
-                    <label className="aspect-square border border-dashed rounded flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 opacity-60 hover:opacity-100 transition-all">
-                       {isUploadingModel ? <RefreshCw className="animate-spin" size={14}/> : <Upload size={14} />}
-                       <span className="text-[7px] mt-1 uppercase font-bold">Import</span>
-                       <input type="file" accept="image/*" className="hidden" onChange={handleModelImport} />
-                    </label>
-
-                    {/* MODEL CARDS */}
-                    {savedModels.map(model => (
-                      <button 
-                        key={model.id}
-                        onClick={() => setSelectedAgentModel(model)}
-                        className={`relative aspect-square rounded overflow-hidden border-2 transition-all ${selectedAgentModel?.id === model.id ? (isDeRoche ? 'border-black' : 'border-[#C5A059]') : 'border-transparent opacity-60 hover:opacity-100'}`}
-                      >
-                        <img src={model.url} className="w-full h-full object-cover" />
-                        {selectedAgentModel?.id === model.id && (
-                          <div className={`absolute inset-0 flex items-center justify-center bg-black/40`}>
-                            <Check size={16} className="text-white drop-shadow-md" />
-                          </div>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-[8px] text-center opacity-50 uppercase font-mono">
-                     {selectedAgentModel ? "Model Locked for Consistency" : "Select a model to lock face"}
-                  </p>
-               </div>
-             ) : (
-               <div className={`space-y-1 opacity-80 animate-in fade-in duration-300`}>
-                  {renderSelectInput("Gender", castGender, setCastGender, CASTING_GENDERS, "e.g. Female")}
-                  {renderSelectInput("Vibe", castVibe, setCastVibe, CASTING_VIBES, "e.g. Regal")}
-                  {renderSelectInput("Hair", castHair, setCastHair, CASTING_HAIR, "e.g. Shaved")}
-                  {renderSelectInput("Face", castFace, setCastFace, CASTING_FACE, "e.g. Alien")}
-                  <div className="relative mt-2"><div className="absolute left-2 top-1/2 -translate-y-1/2 opacity-50"><Fingerprint size={10} /></div><input type="text" value={castDetails} onChange={(e) => setCastDetails(e.target.value)} placeholder="SPECIFIC MARKINGS / DETAILS..." className={`w-full py-2 pl-6 pr-2 text-[10px] border-b bg-transparent rounded-none focus:outline-none placeholder-opacity-50 ${isDeRoche ? 'border-gray-300 text-black placeholder-gray-400' : 'border-[#C5A059]/30 text-[#C5A059] placeholder-[#C5A059]/30'}`} /></div>
-                  <div className="p-2 mt-2 text-[8px] text-center border border-dashed rounded opacity-50 font-mono">
-                     AI will generate a unique face for every shot.
-                  </div>
-               </div>
-             )}
-          </section>
-
-          {/* SECTION 5: SOURCE MATERIAL (UPDATED UI) */}
-          <section>
-             <div className={labelClass}><div className="flex items-center gap-2"><Layers size={12} /> <span>Source Material</span></div></div>
-             <div className="grid grid-cols-2 gap-2">
-                <UploadZone label="Mood" category="moodboard" files={uploadedFiles.filter(f => f.category === 'moodboard')} onAddFiles={(files) => setUploadedFiles([...uploadedFiles, ...files])} onRemoveFile={(id) => setUploadedFiles(uploadedFiles.filter(f => f.id !== id))} />
-                <UploadZone label="Ref" category="reference" files={uploadedFiles.filter(f => f.category === 'reference')} onAddFiles={(files) => setUploadedFiles([...uploadedFiles, ...files])} onRemoveFile={(id) => setUploadedFiles(uploadedFiles.filter(f => f.id !== id))} />
-             </div>
-             
-             {uploadedFiles.length > 0 && (
-               <div className="space-y-3 mt-3 border-t border-dashed border-current/20 pt-3">
-                  <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-widest opacity-70 mb-2">
-                     <span>AI Interpretation Logic</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                     {Object.values(SourceInterpretation).map((mode) => (
-                        <button 
-                           key={mode} 
-                           onClick={() => setSourceInterpretation(sourceInterpretation === mode ? undefined : mode)} 
-                           className={`
-                              px-3 py-2 text-[8px] font-bold uppercase tracking-wider border rounded-sm transition-all truncate
-                              ${sourceInterpretation === mode 
-                                 ? (isDeRoche ? 'bg-black text-white border-black' : 'bg-[#C5A059] text-black border-[#C5A059]')
-                                 : (isDeRoche ? 'bg-white text-gray-500 border-gray-300 hover:border-black hover:text-black' : 'bg-[#111] text-[#C5A059] border-[#C5A059]/30 hover:border-[#C5A059] hover:bg-[#C5A059]/10')
-                              }
-                           `}
-                        >
-                           {mode.replace(/_/g, ' ')}
-                        </button>
-                     ))}
-                  </div>
-                  
-                  <div className="space-y-2">
-                     <textarea 
-                        value={sourceMaterialPrompt} 
-                        onChange={(e) => setSourceMaterialPrompt(e.target.value)} 
-                        placeholder="SPECIFIC INSTRUCTIONS (e.g. 'Use texture from Image A')..." 
-                        className={`w-full h-16 p-2 text-[9px] border rounded-sm resize-none outline-none font-mono ${inputClass} ${isDeRoche ? 'bg-white' : 'bg-[#111]'}`} 
-                     />
-                     <div className={`p-2 rounded-sm border ${isDeRoche ? 'bg-white border-gray-200' : 'bg-[#111] border-[#C5A059]/20'}`}>
-                        <div className="flex justify-between text-[8px] font-bold uppercase opacity-70 mb-2">
-                           <span>Vibe Only</span>
-                           <span>Strict Fidelity</span>
-                        </div>
-                        <input 
-                           type="range" 
-                           min="0" 
-                           max="100" 
-                           step="10" 
-                           value={sourceFidelity} 
-                           onChange={(e) => setSourceFidelity(Number(e.target.value))} 
-                           className={`w-full h-1 bg-gray-500/30 rounded-lg appearance-none cursor-pointer ${isDeRoche ? '[&::-webkit-slider-thumb]:bg-black' : '[&::-webkit-slider-thumb]:bg-[#C5A059]'} [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full`} 
-                        />
-                     </div>
-                  </div>
-               </div>
-             )}
-          </section>
-
-          {/* SECTION 6: CREATIVE DIRECTION */}
-          <PromptInput onGenerate={handleGenerate} onEnhance={handleEnhance} onInspire={handleGetInspiration} overridePrompt={promptOverride} isGenerating={isGenerating} loadingStep={loadingStep} isEnhancing={isEnhancing} isGettingInspiration={isGettingInspiration} useGrounding={useGrounding} setUseGrounding={setUseGrounding} brand={brand} />
-
-          {/* SECTION 7: OUTPUT */}
-          <section className="border-t border-dashed border-current opacity-80 pt-4">
-              <div className={labelClass}><div className="flex items-center gap-2"><Sliders size={12} /> <span>Output Config</span></div></div>
-              <div className="flex bg-[#111] rounded-sm p-1 border border-white/10 mb-3">
-                  <button onClick={() => setImageMode(ImageMode.CINEMATIC)} className={`flex-1 py-1.5 text-[9px] font-bold uppercase transition-all rounded-sm flex items-center justify-center gap-2 ${imageMode === ImageMode.CINEMATIC ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}><Sparkles size={10} /> Editorial</button>
-                  <button onClick={() => setImageMode(ImageMode.LOOKBOOK)} className={`flex-1 py-1.5 text-[9px] font-bold uppercase transition-all rounded-sm flex items-center justify-center gap-2 ${imageMode === ImageMode.LOOKBOOK ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}><Monitor size={10} /> Lookbook</button>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                  <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value as AspectRatio)} className={`w-full p-2 text-[9px] border rounded-sm outline-none appearance-none cursor-pointer uppercase ${inputClass}`}><option value={AspectRatio.PORTRAIT} className="bg-[#111]">Portrait (3:4)</option><option value={AspectRatio.LANDSCAPE} className="bg-[#111]">Landscape (16:9)</option><option value={AspectRatio.SQUARE} className="bg-[#111]">Square (1:1)</option><option value={AspectRatio.TALL} className="bg-[#111]">Mobile (9:16)</option></select>
-                  <select value={resolution} onChange={(e) => setResolution(e.target.value as ImageResolution)} className={`w-full p-2 text-[9px] border rounded-sm outline-none appearance-none cursor-pointer uppercase ${inputClass}`}><option value={ImageResolution.RES_2K} className="bg-[#111]">2K Resolution</option><option value={ImageResolution.RES_4K} className="bg-[#111]">4K Resolution</option></select>
-              </div>
-          </section>
-
-          {/* SIGN OUT */}
-          <div className="pt-4 border-t border-dashed border-current opacity-80">
-             <button 
-               onClick={handleSignOut}
-               className={`w-full py-2 flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-widest transition-all rounded-sm hover:bg-red-900/20 hover:text-red-500 text-gray-500`}
-             >
-                <LogOut size={12} /> {user.isAnonymous ? "Exit Session" : "Log Out"}
-             </button>
-          </div>
+      {/* 1. LEFT SIDEBAR (Redesigned Modules) */}
+      <div className={`w-[360px] h-screen overflow-y-auto custom-scrollbar p-6 flex flex-col gap-8 flex-shrink-0 z-20 shadow-2xl ${sidebarClass}`}>
+        
+        {/* HEADER */}
+        <div className="group relative cursor-pointer mb-2" onClick={() => setShowProfileModal(true)}>
+            <h1 className="text-2xl font-black tracking-tighter uppercase font-header leading-none">
+                LUMIÈRE
+            </h1>
+            <div className="text-[9px] tracking-[0.4em] opacity-40 uppercase">System v4.3 // Modular</div>
         </div>
-      </aside>
+
+        {/* MODULE 1: IDENTITY & STRATEGY */}
+        <section>
+            <div className={labelClass}><div className="flex items-center gap-2"><Hexagon size={12} /> <span>Brand Identity</span></div></div>
+            
+            {/* Dual Archetype Toggle */}
+            <div className="flex mb-2">
+                 <button 
+                    onClick={() => setBrand(BrandArchetype.DE_ROCHE)} 
+                    className={`flex-1 py-3 text-[9px] font-bold uppercase border transition-all ${brand === BrandArchetype.DE_ROCHE ? 'bg-black text-white border-black' : 'opacity-50 border-gray-400'}`}
+                 >
+                    De Roche
+                 </button>
+                 <button 
+                    onClick={() => setBrand(BrandArchetype.CHAOSCHICC)} 
+                    className={`flex-1 py-3 text-[9px] font-bold uppercase border transition-all ${brand === BrandArchetype.CHAOSCHICC ? 'bg-[#C5A059] text-black border-[#C5A059]' : 'opacity-50 border-gray-400'}`}
+                 >
+                    Chaos
+                 </button>
+            </div>
+
+            {/* Campaign Mode */}
+            <div className="flex mb-3">
+                 <button 
+                    onClick={() => setGenerationMode('EDITORIAL')} 
+                    className={`flex-1 py-2 text-[8px] font-bold uppercase border-b-2 transition-all ${generationMode === 'EDITORIAL' ? (isDeRoche ? 'border-black opacity-100' : 'border-[#C5A059] opacity-100') : 'border-transparent opacity-40'}`}
+                 >
+                    Editorial
+                 </button>
+                 <button 
+                    onClick={() => setGenerationMode('CAMPAIGN')} 
+                    className={`flex-1 py-2 text-[8px] font-bold uppercase border-b-2 transition-all ${generationMode === 'CAMPAIGN' ? (isDeRoche ? 'border-black opacity-100' : 'border-[#C5A059] opacity-100') : 'border-transparent opacity-40'}`}
+                 >
+                    Campaign
+                 </button>
+            </div>
+
+            {/* Logo Upload (Clean) */}
+            <div className={`p-2 border border-dashed rounded flex items-center gap-3 ${isDeRoche ? 'border-gray-400' : 'border-[#C5A059]/50'}`}>
+                <div className="w-10 h-10 bg-gray-200 flex items-center justify-center overflow-hidden relative">
+                    {(brand === BrandArchetype.DE_ROCHE && deRocheLogo) ? <img src={deRocheLogo.previewUrl} className="w-full h-full object-cover"/> : 
+                     (brand === BrandArchetype.CHAOSCHICC && chaosLogo) ? <img src={chaosLogo.previewUrl} className="w-full h-full object-cover"/> : 
+                     <Upload size={12} className="opacity-50"/>}
+                    <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleLogoUpload(e, brand)} />
+                </div>
+                <div className="flex-1">
+                    <div className="text-[8px] font-bold uppercase">Upload Insignia</div>
+                    <div className="text-[7px] opacity-60">PNG / Transparent Recommended</div>
+                </div>
+            </div>
+        </section>
+
+        {/* MODULE 2: CHROMATIC LAB */}
+        <section>
+             <div className={labelClass}><div className="flex items-center gap-2"><Palette size={12} /> <span>Chromatic Lab</span></div></div>
+             <div className="flex gap-1 mb-2">
+                 {['AUTO', 'BRAND', 'CUSTOM'].map(m => (
+                     <button key={m} onClick={() => setColorMode(m as any)} className={`flex-1 py-2 text-[8px] font-bold uppercase border rounded-sm transition-all ${colorMode === m ? (isDeRoche ? 'bg-black text-white border-black' : 'bg-[#C5A059] text-black border-[#C5A059]') : 'opacity-50 border-transparent hover:opacity-100'}`}>
+                         {m}
+                     </button>
+                 ))}
+             </div>
+             {colorMode === 'CUSTOM' && (
+                 <div className="grid grid-cols-5 gap-1 animate-in fade-in duration-300">
+                     {[0,1,2,3,4].map(i => (
+                         <div key={i} className="relative aspect-square border border-dashed rounded-sm overflow-hidden group">
+                             <input type="color" value={selectedColors[i] || '#000000'} onChange={(e) => handleColorAdd(e.target.value, i)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                             <div className="w-full h-full" style={{ backgroundColor: selectedColors[i] || 'transparent' }}></div>
+                             {selectedColors[i] && <button onClick={() => handleColorRemove(i)} className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 text-white"><X size={10}/></button>}
+                             {!selectedColors[i] && <div className="absolute inset-0 flex items-center justify-center opacity-30"><Plus size={10}/></div>}
+                         </div>
+                     ))}
+                 </div>
+             )}
+             {colorMode === 'BRAND' && (
+                 <div className="p-2 border rounded-sm text-[9px] font-mono opacity-70 flex items-center gap-2">
+                     <div className={`w-3 h-3 rounded-full ${isDeRoche ? 'bg-[#A7A8AA]' : 'bg-[#4F2170]'}`}></div>
+                     Using {brand === BrandArchetype.DE_ROCHE ? 'De Roche' : 'ChaosChicc'} Palette.
+                 </div>
+             )}
+        </section>
+
+        {/* MODULE 3: VISUAL ENGINEERING (The Core) */}
+        <div className="flex-1 flex flex-col min-h-[250px]">
+            <PromptInput 
+              onGenerate={handleGenerate}
+              onEnhance={handleEnhance}
+              onInspire={handleGetInspiration}
+              overridePrompt={promptOverride}
+              isGenerating={isGenerating}
+              loadingStep={loadingStep}
+              isEnhancing={isEnhancing}
+              isGettingInspiration={isGettingInspiration}
+              useGrounding={useGrounding}
+              setUseGrounding={setUseGrounding}
+              brand={brand}
+            />
+            
+            <div className="mt-4">
+               <UploadZone 
+                 label="Visual References (Moodboard)" 
+                 category="inspiration" 
+                 files={uploadedFiles} 
+                 onAddFiles={(newFiles) => setUploadedFiles(prev => [...prev, ...newFiles])} 
+                 onRemoveFile={(id) => setUploadedFiles(prev => prev.filter(f => f.id !== id))} 
+               />
+            </div>
+        </div>
+
+        {/* MODULE 4: CASTING */}
+        <CastingDirector 
+           brand={brand}
+           castGender={castGender} setCastGender={setCastGender}
+           castVibe={castVibe} setCastVibe={setCastVibe}
+           castHair={castHair} setCastHair={setCastHair}
+           castFace={castFace} setCastFace={setCastFace}
+           castDetails={castDetails} setCastDetails={setCastDetails}
+           activeTab={castingTab} onTabChange={setCastingTab}
+        />
+        
+        {/* MODULE 5: SET DESIGN (Bottom Anchored) */}
+        <section className="pt-4 border-t border-dashed border-gray-500/30">
+            <div className={labelClass}><div className="flex items-center gap-2"><Monitor size={12} /> <span>Set Design</span></div></div>
+            <div className="grid grid-cols-2 gap-2 mb-2">
+                <button onClick={randomizeScene} className={`col-span-2 py-2 text-[9px] uppercase font-bold border rounded-sm flex items-center justify-center gap-2 hover:bg-white/10 ${isDeRoche ? 'border-gray-300' : 'border-[#C5A059]/30'}`}>
+                    <Dice5 size={12} /> Randomize Scene
+                </button>
+                <div className="relative group">
+                     <select value={environment} onChange={(e) => setEnvironment(e.target.value)} className={`w-full p-2 text-[9px] border rounded-sm outline-none appearance-none font-mono uppercase ${inputClass}`}>
+                        <option value="RANDOM">Env: Random</option>
+                        {Object.values(EnvironmentPreset).filter(k => k !== 'RANDOM').map(e => <option key={e} value={e}>{e.replace('_', ' ')}</option>)}
+                     </select>
+                </div>
+                <div className="relative group">
+                     <select value={lighting} onChange={(e) => setLighting(e.target.value)} className={`w-full p-2 text-[9px] border rounded-sm outline-none appearance-none font-mono uppercase ${inputClass}`}>
+                        <option value="RANDOM">Light: Random</option>
+                        {Object.values(LightingPreset).filter(k => k !== 'RANDOM').map(l => <option key={l} value={l}>{l.replace('_', ' ')}</option>)}
+                     </select>
+                </div>
+            </div>
+            
+            <div className="relative mt-2">
+                <input 
+                   type="text" 
+                   value={customScenePrompt} 
+                   onChange={(e) => setCustomScenePrompt(e.target.value)} 
+                   placeholder="CUSTOM SCENE DETAILS..."
+                   className={`w-full py-2 px-2 text-[10px] border-b bg-transparent rounded-none focus:outline-none placeholder-opacity-50 font-mono uppercase ${isDeRoche ? 'border-gray-300 text-black placeholder-gray-400' : 'border-[#C5A059]/30 text-[#C5A059] placeholder-[#C5A059]/30'}`} 
+                />
+            </div>
+
+            <div className="flex gap-2 mt-3">
+               <div className={`flex-1 flex items-center justify-between p-2 border rounded-sm ${inputClass}`}>
+                  <span className="text-[9px] uppercase font-bold opacity-70">SEED LOCK</span>
+                  <button onClick={() => setIsSeedLocked(!isSeedLocked)} className={isSeedLocked ? 'text-green-500' : 'opacity-30'}>
+                     {isSeedLocked ? <Lock size={12}/> : <Unlock size={12}/>}
+                  </button>
+               </div>
+               <div className={`flex-1 flex items-center justify-between p-2 border rounded-sm ${inputClass}`}>
+                   <span className="text-[9px] uppercase font-bold opacity-70">RES</span>
+                   <select value={resolution} onChange={(e) => setResolution(e.target.value as ImageResolution)} className="bg-transparent text-[9px] font-bold outline-none uppercase">
+                       <option value={ImageResolution.RES_1K}>1K</option>
+                       <option value={ImageResolution.RES_2K}>2K</option>
+                       <option value={ImageResolution.RES_4K} disabled={!hasApiKey}>4K {hasApiKey ? '' : '(LOCKED)'}</option>
+                   </select>
+               </div>
+            </div>
+            
+            <div className="flex items-center justify-between mt-4">
+                <button 
+                    onClick={handleSignOut} 
+                    className="opacity-40 hover:opacity-100 transition-opacity flex items-center gap-2 text-[9px] font-bold uppercase" 
+                    title={user?.isAnonymous ? "Exit Guest Session" : "Sign Out"}
+                >
+                    <LogOut size={10} /> Logout
+                </button>
+                {!hasApiKey && <button onClick={() => setShowApiKeyModal(true)} className="text-[8px] opacity-50 hover:opacity-100 hover:underline">Unlock 4K</button>}
+            </div>
+        </section>
+
+      </div>
 
       {/* 2. MAIN GALLERY AREA */}
-      <main className="flex-1 flex flex-col h-full relative z-10">
-         {/* ARCHIVE CONTROLS HEADER */}
+      <div className={`flex-1 h-screen flex flex-col relative ${bgClass}`}>
          <ArchiveControls 
-           searchQuery={searchQuery}
-           onSearchChange={setSearchQuery}
-           filterBrand={galleryFilter}
-           onFilterBrandChange={setGalleryFilter}
-           sortBy={sortBy}
-           onSortChange={setSortBy}
-           showFavoritesOnly={showFavoritesOnly}
-           onToggleFavorites={() => setShowFavoritesOnly(!showFavoritesOnly)}
+           searchQuery={searchQuery} onSearchChange={setSearchQuery}
+           filterBrand={galleryFilter} onFilterBrandChange={setGalleryFilter}
+           sortBy={sortBy} onSortChange={setSortBy}
+           showFavoritesOnly={showFavoritesOnly} onToggleFavorites={() => setShowFavoritesOnly(!showFavoritesOnly)}
            isDeRoche={isDeRoche}
          />
 
-         {/* GALLERY CONTENT */}
-         <div className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar">
-            {filteredAndSortedImages.length === 0 ? (
-               <div className="h-full flex flex-col items-center justify-center opacity-30 text-center">
-                  <Filter size={48} className="mb-4" />
-                  <p className="text-sm font-mono uppercase tracking-widest">No assets found.</p>
-                  <p className="text-xs mt-2">Adjust filters or generate new concepts.</p>
-               </div>
-            ) : (
-               /* Masonry-style Grid */
-               <div className="columns-1 md:columns-2 lg:columns-3 xl:columns-4 gap-4 space-y-4">
-                  {filteredAndSortedImages.map(img => (
-                     <div key={img.id} className="break-inside-avoid">
-                        <GeneratedImageCard 
-                           image={img}
-                           isSelected={comparisonImageId === img.id}
-                           onToggleSelect={() => setComparisonImageId(comparisonImageId === img.id ? null : img.id)}
-                           onOpenSidebar={() => setSelectedImageId(img.id)}
-                           onRate={(r) => handleRateImage(img.id, r)}
-                           onDownload={handleDownloadImage}
-                        />
-                     </div>
-                  ))}
-               </div>
-            )}
-         </div>
-      </main>
-
-      {/* 3. COLLECTION ARCHITECT */}
-      <Suspense fallback={<div className="fixed bottom-8 left-8 bg-black/80 text-white p-4 rounded flex items-center gap-2 z-[9999]"><Loader2 className="animate-spin" /> Initializing Tldraw Engine...</div>}>
-         <CollectionArchitect brand={brand} images={generatedImages} onOpenNarrative={setActiveLookForNarrative} onVisualizeLook={(look) => { setPromptOverride(`${look.coreItem} in ${look.material}. ${look.vibe} vibe. ${look.silhouette} silhouette.`); }} />
-      </Suspense>
-      
-      <ChatBot brand={brand} />
-
-      {/* MODALS */}
-      {showApiKeyModal && <ApiKeyModal onSelect={handleApiKeySelect} />}
-      {showProfileModal && <ProfileModal onClose={() => setShowProfileModal(false)} />}
-      {showVibeCheck && <VibeCheck onClose={() => setShowVibeCheck(false)} onComplete={(b) => { setBrand(b); setShowVibeCheck(false); }} />}
-      {selectedImageId && (<RightSidebar 
-          selectedImage={generatedImages.find(i => i.id === selectedImageId) || null} 
-          onClose={() => setSelectedImageId(null)} 
-          onUpdateImage={handleUpdateImage} 
-          onAddSketch={handleAddSketch} 
-          onEditStart={handleEditImage} 
-          onGenerateTechPack={triggerTechPack} 
-          isGeneratingTechPack={isGeneratingTechPack} 
-          onGenerateVariations={triggerVariations} 
-          isGeneratingVariations={isGeneratingVariations} 
-          onGenerateVideo={triggerVideo} 
-          isGeneratingVideo={isGeneratingVideo} 
-          onSimulateFabric={triggerSimulateFabric} 
-          isSimulatingFabric={isSimulatingFabric} 
-          onGenerateIteration={handleIterationTrigger} 
-          onGenerateStrategy={triggerMarketing} 
-          isGeneratingStrategy={isMarketingLoading} 
-          onOpenStudio={() => setShowStudio(true)}
-          onSaveAsModel={handleSaveAsModel}
-      />)}
-      {showMarketingModal && <MarketingModal strategy={marketingStrategy} isLoading={isMarketingLoading} brand={brand} onClose={() => setShowMarketingModal(false)} onVisualize={(p) => setPromptOverride(p)} />}
-      {showTechPackModal && techPack && selectedImageId && (<Suspense fallback={<div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 text-white"><Loader2 size={48} className="animate-spin mb-4" /><p>Compiling Technical Data...</p></div>}><TechPackModal techPack={techPack} image={generatedImages.find(i => i.id === selectedImageId)!} onClose={() => setShowTechPackModal(false)} /></Suspense>)}
-      {comparisonImageId && selectedImageId && comparisonImageId !== selectedImageId && <ImageComparator image1={generatedImages.find(i => i.id === selectedImageId)!} image2={generatedImages.find(i => i.id === comparisonImageId)!} onClose={() => setComparisonImageId(null)} />}
-      {activeLookForNarrative && <NarrativeEngine look={activeLookForNarrative} brand={brand} onClose={() => setActiveLookForNarrative(null)} onSendToProduction={(narrative) => { console.log("Narrative approved:", narrative); setActiveLookForNarrative(null); }} />}
-      {showStudio && selectedImageId && <ImmersiveStudio image={generatedImages.find(i => i.id === selectedImageId)!} brand={brand} onClose={() => setShowStudio(false)} onApplyToImage={handleStudioApply} />}
-      {showGuestExitModal && <GuestExitModal onClose={() => setShowGuestExitModal(false)} onConvertToUser={() => { setShowGuestExitModal(false); alert("Please link your account in the Profile settings (Coming Soon) or copy your data manually."); }} />}
-    </div>
-  );
-};
-
-export default App;
+         <div className="flex-1 overflow-y-auto p-4

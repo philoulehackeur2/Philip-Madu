@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { GeneratedImage, BrandArchetype } from '../types';
-import { Loader2, Sparkles, FileText, X, Wand2, PenTool, Copy, Video, Waves, GitBranch, Zap, Split, TestTube, Edit3, Palette, Ruler, Image as ImageIcon, Maximize2, UserPlus } from 'lucide-react';
+import { Loader2, Sparkles, FileText, X, Wand2, PenTool, Copy, Video, Waves, GitBranch, Zap, Split, TestTube, Edit3, Palette, Ruler, Image as ImageIcon, Maximize2, UserPlus, Shirt } from 'lucide-react';
 import { generateConceptSketch, modifyGarmentFabric } from '../services/geminiService';
 import { PatternCutter } from './PatternCutter';
 
@@ -24,6 +24,7 @@ interface RightSidebarProps {
   isGeneratingStrategy: boolean;
   onOpenStudio: () => void;
   onSaveAsModel?: (image: GeneratedImage) => void;
+  onOpenTryOn?: (image: GeneratedImage) => void; // New Prop
 }
 
 export const RightSidebar = React.memo<RightSidebarProps>(({
@@ -44,7 +45,8 @@ export const RightSidebar = React.memo<RightSidebarProps>(({
   onGenerateStrategy,
   isGeneratingStrategy,
   onOpenStudio,
-  onSaveAsModel
+  onSaveAsModel,
+  onOpenTryOn
 }) => {
   const [activeTab, setActiveTab] = useState<'ATELIER' | 'CONSTRUCTION'>('ATELIER');
   const [showPatternCutter, setShowPatternCutter] = useState(false);
@@ -387,8 +389,22 @@ export const RightSidebar = React.memo<RightSidebarProps>(({
         {/* --- CONSTRUCTION TAB (Technical) --- */}
         {activeTab === 'CONSTRUCTION' && (
            <>
-             {/* 1. Technical Drawing (Restored) */}
+             {/* 1. Virtual Fitting (VTON) - NEW */}
              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-white/80">
+                   <Shirt size={14} className={accentColor} />
+                   <label className="text-xs uppercase tracking-widest font-bold">Virtual Fitting Room</label>
+                </div>
+                <button 
+                   onClick={() => onOpenTryOn && onOpenTryOn(selectedImage)}
+                   className={`w-full py-4 text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 text-black transition-all ${isChaos ? 'bg-[#C5A059] hover:bg-white' : 'bg-white hover:bg-gray-200'}`}
+                >
+                   <Sparkles size={16} /> Try On Agency Model
+                </button>
+             </div>
+
+             {/* 2. Technical Drawing */}
+             <div className="space-y-3 pt-4 border-t border-white/5">
                 <div className="flex items-center gap-2 text-white/80">
                    <PenTool size={14} className={accentColor} />
                    <label className="text-xs uppercase tracking-widest font-bold">Technical Illustration</label>
@@ -403,7 +419,7 @@ export const RightSidebar = React.memo<RightSidebarProps>(({
                 </button>
              </div>
 
-             {/* 2. Pattern Cutter Trigger */}
+             {/* 3. Pattern Cutter Trigger */}
              <div className="space-y-3 pt-4 border-t border-white/5">
                 <div className="flex items-center gap-2 text-white/80">
                    <Ruler size={14} className={accentColor} />
@@ -411,13 +427,13 @@ export const RightSidebar = React.memo<RightSidebarProps>(({
                 </div>
                 <button 
                    onClick={() => setShowPatternCutter(true)}
-                   className={`w-full py-4 text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 text-black transition-all ${isChaos ? 'bg-[#C5A059] hover:bg-white' : 'bg-white hover:bg-gray-200'}`}
+                   className={`w-full py-3 text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 border transition-all ${isChaos ? 'border-[#C5A059] text-[#C5A059] hover:bg-[#C5A059]/10' : 'border-white text-white hover:bg-white/10'}`}
                 >
                    <PenTool size={16} /> Open Pattern Cutter
                 </button>
              </div>
 
-             {/* 3. Tech Pack */}
+             {/* 4. Tech Pack */}
              <div className="space-y-3 pt-4 border-t border-white/5">
                 <button 
                    onClick={() => onGenerateTechPack(selectedImage)}

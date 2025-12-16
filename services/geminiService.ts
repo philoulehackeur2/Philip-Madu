@@ -9,6 +9,33 @@ export const constructEvolutionaryPrompt = _constructEvolutionaryPrompt;
 export const generateMarketingStrategy = _generateMarketingStrategy;
 export const groundPromptWithSearch = _groundPromptWithSearch;
 
+// --- VTON MEGA PROMPT TEMPLATE ---
+const VTON_PROMPT_TEMPLATE = `
+**ROLE:**
+You are the **Vertex AI VTON Technologist**. Your goal is to generate the precise JSON parameters required to drive the Virtual Try-On API.
+
+**INPUT DATA:**
+* **User Request:** "{user_style_request}"
+* **Garment Analysis:** (See Image 2)
+* **Model Analysis:** (See Image 1)
+
+**TASK:**
+Analyze the inputs and generate the configurations.
+
+**OUTPUT FORMAT (JSON ONLY):**
+{
+  "prompt": "A photorealistic high-fidelity shot of a [GENDER] model wearing [DETAILED_GARMENT_DESCRIPTION]. The model has [HAIR_COLOR] hair and [SKIN_TONE] skin. Lighting matches the original source. 8k resolution, highly detailed texture.",
+  "subjectDescription": "A [GENDER] with [HAIR_STYLE], [BODY_TYPE], standing in [POSE_DESCRIPTION].",
+  "negativePrompt": "deformed, blurry, cartoon, illustration, low quality, pixelated, extra limbs, distorted face, changing face, changing background",
+  "guidanceScale": 60
+}
+
+**RULES:**
+1. **Garment Accuracy:** The \`prompt\` must describe the garment using specific fashion terminology (e.g., instead of "red shirt," use "crimson silk chiffon blouse with bishop sleeves").
+2. **Identity Lock:** The \`subjectDescription\` must strictly describe the physical attributes of the source model to reinforce the ID lock.
+3. **Photography Style:** Always include "photorealistic, 8k, highly detailed".
+`;
+
 // --- MODEL PRESETS ---
 export const MODEL_PRESETS: ModelPreset[] = [
   // De Roche Presets
@@ -27,14 +54,8 @@ export const MODEL_PRESETS: ModelPreset[] = [
 // --- TEXTURE & GENRE LISTS (Shortened for brevity but preserved logic) ---
 const DE_ROCHE_SUBGENRES = ["Eco-Brutalism", "Metabolist Architecture", "Soviet Gigantism", "Bunker Archaeology", "Monolithic Zen", "High-Tech Industrialism"];
 const DE_ROCHE_TEXTURES = ["Weathered travertine", "Frosted aerospace glass", "Raw felt", "Oxidized copper", "Wet slate", "Volcanic ash", "Chiseled granite", "Translucent resin", "Ramie fabric", "Scorched timber"];
-const CHAOS_SUBGENRES = ["Neo-Expressionism", "Glitch Baroque", "Industrial Trash", "Cyber-Rot", "Vandalized Rococo", "Francis Bacon's Glass Cages", "Acid Rave", "Flesh & Metal"];
-const CHAOS_TEXTURES = ["Burnt velvet", "Spray-painted lace", "Cracked mirrors", "Oil slick on asphalt", "Ripped billboard paper", "Rusted chainmail", "Melting plastic", "Blood-stained silk", "Duct tape patchwork"];
-
-const UNEXPECTED_DETAILS = [
-  "A floating geometric shape in the background", "The floor is covered in water", "Strange wires hanging from the ceiling",
-  "A classic oil painting melting on the wall", "Thick smoke crawling on the floor", "Shadows that don't match the subject",
-  "Red laser lines cutting across the frame", "An unexpected animal (a crow, a wolf, a sphinx cat)", "Inverted gravity elements", "Digital glitch artifacts in the air"
-];
+const CHAOS_SUBGENRES = ["Neo-Expressionism", "Glitch Baroque", "Industrial Trash", "Cyber-Rot", "Vandalized Rococo", "Francis Bacon's Cages", "Acid Rave", "Flesh & Metal"];
+const CHAOS_TEXTURES = ["Burnt velvet", "Spray-painted lace", "Oil slick on asphalt", "Ripped billboard paper", "Rusted chainmail", "Melting plastic", "Blood-stained silk", "Duct tape patchwork"];
 
 const ENVIRONMENT_DESCRIPTIONS: Record<EnvironmentPreset, string> = {
   [EnvironmentPreset.NEUTRAL_STUDIO]: "Neutral Fashion Studio. Infinite cyclorama wall. Perfectly smooth gradient background. No distractions.",
@@ -62,7 +83,7 @@ const LIGHTING_DESCRIPTIONS: Record<LightingPreset, string> = {
   [LightingPreset.HARSH_SUN]: "Harsh Mediterranean Sun. Direct midday sunlight. Blindingly bright highlights, pitch black shadows. High dynamic range.",
   [LightingPreset.CLOUDY]: "Cloudy Soft Shadow. Even, flat illumination. No harsh highlights. Perfect for showing garment details.",
   [LightingPreset.SODIUM_VAPOR]: "Sodium Vapor Ambience. Sickly orange/yellow street lighting. Nighttime urban feel. Gritty and industrial.",
-  [LightingPreset.NEON]: "Nighttime Neon. Illuminated by neon signs (pink, blue, green). Reflective surfaces catch the colored light.",
+  [LightingPreset.NEON]: "Nighttime Neon. Illuminated by neon signs (pink, blue, green). Dark textures catch the colored light.",
   [LightingPreset.RANDOM]: "Randomized Lighting."
 };
 
@@ -80,18 +101,14 @@ const FRAMING_DESCRIPTIONS: Record<FramingPreset, string> = {
 
 const MODEL_FEATURES = {
   genders: ["Androgynous", "Male", "Female", "Non-binary", "Fluid", "Gender-ambiguous", "Ethereal Being", "Masculine-Leaning", "Feminine-Leaning"],
-  eyes: ["heterochromia", "invisible eyebrows", "wide-set alien eyes", "intense unblinking stare", "heavy hooded eyelids", "glassy feverish look"],
-  skinTexture: ["raw uneven pigmentation", "freckle constellations", "vitiligo patches", "oily sweat sheen", "dry flaky patches", "visible pores"],
   vibes: ["dissociated", "manic", "regal", "feral", "haughty", "melancholic", "sleep-deprived", "transcendent"],
   deRoche: {
     hair: ["severe architectural bob", "completely shaved head", "slicked back wet look", "long straight severe center part", "geometric spherical afro"],
-    face: ["high sharp cheekbones", "strong square jawline", "no makeup, raw skin", "very pale porcelain skin", "deep rich onyx skin"],
-    tattoos: ["no tattoos", "single geometric line", "minimalist barcode", "faint white ink branding", "chrome silver patches"]
+    face: ["high sharp cheekbones", "strong square jawline", "no makeup, raw skin", "very pale porcelain skin", "deep rich onyx skin"]
   },
   chaos: {
     hair: ["messy DIY mullet", "jagged uneven chop", "liberty spikes", "greasy matted straggles", "regrowth roots bleached ends"],
-    face: ["smudged heavy eyeliner", "gold tooth cap", "sweat sheen feverish", "bleeding lipstick", "scar through eyebrow"],
-    tattoos: ["chaotic scribble tattoos", "blackout neck", "UV-reactive circuit", "stick-and-poke scrawls", "full face glitch-art"]
+    face: ["smudged heavy eyeliner", "gold tooth cap", "sweat sheen feverish", "bleeding lipstick", "scar through eyebrow"]
   }
 };
 
@@ -138,7 +155,7 @@ const base64ToBlobUrl = (base64Data: string, mimeType: string = 'image/png'): st
 };
 
 // Robust Base64 extraction with fallback for CORS/Auth issues
-const getBase64FromUrl = async (url: string): Promise<{ base64: string, mimeType: string }> => {
+export const getBase64FromUrl = async (url: string): Promise<{ base64: string, mimeType: string }> => {
   if (!url) throw new Error("URL is empty");
 
   // 1. Data URL
@@ -148,7 +165,7 @@ const getBase64FromUrl = async (url: string): Promise<{ base64: string, mimeType
     return { base64, mimeType };
   }
 
-  // 2. Blob URL (Local) - Safe to fetch without explicit CORS settings usually
+  // 2. Blob URL (Local)
   if (url.startsWith('blob:')) {
      try {
         const response = await fetch(url);
@@ -168,7 +185,6 @@ const getBase64FromUrl = async (url: string): Promise<{ base64: string, mimeType
         });
      } catch (e) {
          console.warn("Blob fetch failed, falling back to image method", e);
-         // Fallthrough
      }
   }
 
@@ -191,7 +207,7 @@ const getBase64FromUrl = async (url: string): Promise<{ base64: string, mimeType
   } catch (error: any) {
     console.warn("Standard fetch failed, attempting Image fallback for CORS/Cache:", error);
     
-    // 4. Fallback: HTMLImageElement (Handles some cross-origin/cache cases better)
+    // 4. Fallback: HTMLImageElement
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.crossOrigin = "Anonymous"; 
@@ -218,6 +234,132 @@ const getBase64FromUrl = async (url: string): Promise<{ base64: string, mimeType
   }
 };
 
+// --- VIRTUAL TRY-ON (VTON) MODULE ---
+
+interface VTONParameters {
+  prompt: string;
+  subjectDescription: string;
+  negativePrompt: string;
+  guidanceScale: number;
+}
+
+export const generateVTONParameters = async (modelBase64: string, garmentBase64: string, userRequest: string): Promise<VTONParameters> => {
+  const ai = getClient();
+  const finalPrompt = VTON_PROMPT_TEMPLATE.replace("{user_style_request}", userRequest || "Create a high-fashion editorial");
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: {
+      parts: [
+        { inlineData: { mimeType: 'image/png', data: modelBase64 } }, // Image 1 (Model)
+        { inlineData: { mimeType: 'image/png', data: garmentBase64 } }, // Image 2 (Garment)
+        { text: finalPrompt }
+      ]
+    },
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          prompt: { type: Type.STRING },
+          subjectDescription: { type: Type.STRING },
+          negativePrompt: { type: Type.STRING },
+          guidanceScale: { type: Type.NUMBER }
+        }
+      }
+    }
+  });
+
+  if (response.text) {
+    return JSON.parse(response.text) as VTONParameters;
+  }
+  throw new Error("Failed to generate VTON parameters");
+};
+
+export const executeVirtualTryOn = async (modelUrl: string, garmentUrl: string, userRequest: string): Promise<string> => {
+  const ai = getClient();
+  
+  // 1. Fetch Images
+  const [modelImg, garmentImg] = await Promise.all([
+    getBase64FromUrl(modelUrl),
+    getBase64FromUrl(garmentUrl)
+  ]);
+
+  // 2. Generate Parameters (The "Technologist" Step)
+  const vtonParams = await generateVTONParameters(modelImg.base64, garmentImg.base64, userRequest);
+
+  // 3. Execute VTON Simulation (Using Gemini 1.5 Pro to proxy the Vertex Vision API behavior)
+  // We use the strict parameters generated to guide the model.
+  const simulationPrompt = `
+    [VIRTUAL TRY-ON EXECUTION]
+    ${vtonParams.subjectDescription}
+    WEARING: ${vtonParams.prompt}
+    
+    SOURCE IMAGES PROVIDED:
+    1. MODEL (Reference for Identity/Face/Pose)
+    2. GARMENT (Reference for Texture/Style)
+    
+    MANDATE:
+    - RETAIN the facial identity and bone structure of Image 1 EXACTLY.
+    - APPLY the garment from Image 2 onto the model in Image 1.
+    - High fidelity, 8k resolution.
+  `;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-pro-image-preview', // High fidelity model for VTON
+    contents: {
+      parts: [
+        { inlineData: { mimeType: modelImg.mimeType, data: modelImg.base64 } },
+        { inlineData: { mimeType: garmentImg.mimeType, data: garmentImg.base64 } },
+        { text: simulationPrompt }
+      ]
+    },
+    config: {
+      imageConfig: { aspectRatio: '3:4', imageSize: '2K' } // Vertical portrait for fashion
+    }
+  });
+
+  for (const part of response.candidates?.[0]?.content?.parts || []) {
+    if (part.inlineData && part.inlineData.data) {
+      return base64ToBlobUrl(part.inlineData.data, part.inlineData.mimeType);
+    }
+  }
+  throw new Error("VTON Generation failed");
+};
+
+// --- FACE GEOMETRY SCANNER (NEW MODULE) ---
+// Analyzes the reference image to create a strict biometric text map
+export const scanFaceGeometry = async (base64: string, mimeType: string): Promise<string> => {
+  const ai = getClient();
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash', // Fast inference
+      contents: {
+        parts: [
+          { inlineData: { mimeType, data: base64 } },
+          { text: `
+            PERFORM A BIOMETRIC FACE SCAN.
+            Output a dense, comma-separated list of physical traits for this person to assist a 3D modeler in recreating them.
+            Focus strictly on:
+            1. Bone Structure (Jawline width, Cheekbone prominence/height, Chin shape, Face shape)
+            2. Eyes (Canthal tilt, shape, spacing, eyelid crease, eyebrow arch)
+            3. Nose (Bridge width, Tip shape, Nostril flare, Length)
+            4. Mouth (Lip fullness, Cupid's bow shape, Philtrum depth, Commisure angle)
+            5. Skin/Identity (Undertone, Freckles, Texture, Moles, Age markers)
+            
+            Do not describe clothing, lighting or background. ONLY THE BIOMETRICS.
+          `}
+        ]
+      }
+    });
+    return response.text || "";
+  } catch (e) {
+    console.warn("Face scan failed", e);
+    return "";
+  }
+};
+
+// ... existing auth exports ...
 export const checkApiKey = async (): Promise<boolean> => {
   if (typeof window !== 'undefined' && (window as any).aistudio) {
     return await (window as any).aistudio.hasSelectedApiKey();
@@ -327,109 +469,95 @@ export const generateEditorialImages = async ({
 
   const envDesc = ENVIRONMENT_DESCRIPTIONS[environment as EnvironmentPreset] || environment;
   const lightDesc = LIGHTING_DESCRIPTIONS[lighting as LightingPreset] || lighting;
-  const frameDesc = FRAMING_DESCRIPTIONS[framing as FramingPreset] || framing;
-
+  
   const randomTexture = isDeRoche ? getRandom(DE_ROCHE_TEXTURES) : getRandom(CHAOS_TEXTURES);
   const artAdjectives = ["Dadaist", "Constructivist", "Baroque", "Cybernetic", "Paleolithic", "Surrealist", "Brutalist"];
   const abstractNouns = ["Decay", "Geometry", "Hysteria", "Silence", "Glitch", "Echo", "Mutation"];
   const bizarrePairing = `${getRandom(artAdjectives)} ${getRandom(abstractNouns)}`;
   
-  // LOGIC: If referenceModelUrl exists, prioritize it and ignore random descriptions that conflict
-  let finalModelDescription = modelPrompt || generateRandomModelProfile(brand);
-  let idPreservationInstruction = "";
-
   const parts: any[] = [];
+  let faceInstruction = "";
+  let finalModelDescription = modelPrompt || generateRandomModelProfile(brand);
 
-  // --- 1. PRIORITY: MODEL REFERENCE (If Exists) ---
+  // --- 1. HANDLE THE FACE (SCANNER MODULE INTEGRATION) ---
   if (referenceModelUrl) {
+      console.log("🔒 LOCKING FACE IDENTITY:", referenceModelUrl);
+      
       try {
+          // Fetch and convert the model image
           const { base64, mimeType } = await getBase64FromUrl(referenceModelUrl);
-          parts.push({ inlineData: { mimeType, data: base64 } });
-          parts.push({
-             text: "PRIMARY REFERENCE (MODEL IDENTITY): The image above is the specific model booked for this shoot. You MUST maintain this person's exact facial identity, bone structure, age, and ethnicity. Ignore any conflicting text descriptions of physical features."
-          });
           
-          // Override the random text description to focus on identity preservation
-          finalModelDescription = "The specific model shown in the first reference image. " + (modelPrompt || ""); 
-          idPreservationInstruction = "- FACE/IDENTITY: STRICT ADHERENCE to the reference image. Do not change facial features.";
+          // Push the Model Image FIRST
+          parts.push({ inlineData: { mimeType, data: base64 } });
+          
+          // Instruction - If we have explicit biometrics in the modelPrompt, use them.
+          // Otherwise, we rely on the image + strict instructions.
+          // NOTE: The `modelPrompt` passed here might already contain the biometric text if available from the Store.
+          
+          faceInstruction = `
+          [CRITICAL MANDATE: FACE REPLICATION]
+          - The first image provided above is the REFERENCE MODEL.
+          - You MUST generate a subject with the EXACT same facial features, bone structure, and ethnicity.
+          - IGNORE the hair and clothing from the reference image; only copy the FACE.
+          
+          *** REPLICATION RULES ***
+          1. Match the eye shape, nose bridge, and lip fullness exactly.
+          2. Match distinctive skin features (moles, texture) from the reference.
+          3. Do not "beautify" or "average" the face. Keep unique irregularities.
+          4. Ensure the lighting on the face matches the scene, but do not alter the bone structure.
+          `;
+          
+          // Override model prompt to reinforce this
+          finalModelDescription = `The specific model shown in the first reference image. ${modelPrompt || ''}`;
       } catch (e) {
-          console.warn("Failed to load reference model image - proceeding without it.", e);
+          console.warn("Could not load reference model, proceeding without face lock.", e);
       }
   }
 
-  // --- 2. SECONDARY: MOOD/STYLE REFERENCE ---
-  const sentiment = getRandom(MODEL_FEATURES.vibes);
-  let referenceAnchorText = "";
-  
-  if (uploadedFiles.length > 0) {
-    const fidelityInstruction = sourceFidelity > 80 
-        ? "STRICT FIDELITY: Reproduce visual elements closely."
-        : `CREATIVE FREEDOM (FIDELITY ${sourceFidelity}%): Extract the VIBE.`;
-    const specificInstructions = sourceMaterialPrompt ? `USER NOTES: "${sourceMaterialPrompt}".` : "";
-    referenceAnchorText = `SOURCE MATERIAL (STYLE ONLY): ${fidelityInstruction} ${specificInstructions} MODE: ${sourceInterpretation || 'VIBE TRANSFER'}`;
-    
-    uploadedFiles.forEach(file => {
-      parts.push({ inlineData: { mimeType: file.mimeType, data: file.base64 } });
-    });
-    parts.push({ text: "STYLE REFERENCE: Use the above images for lighting, texture, and mood guidance only. Do not blend their faces." });
-  }
+  // --- 2. Add Standard Uploads (Moodboard/References) ---
+  uploadedFiles.forEach(file => {
+    parts.push({ inlineData: { mimeType: file.mimeType, data: file.base64 } });
+  });
 
   if (logoBase64) {
     parts.push({ inlineData: { mimeType: 'image/png', data: logoBase64 } });
     parts.push({ text: "BRAND LOGO: Integrate this logo naturally." });
   }
 
-  // ... rest of prompt construction ...
-  let iterationInstruction = "";
-  if (iterationMode !== 'NONE') {
-      iterationInstruction = `MODE: ${iterationMode}. Refine, Mutate, or Break the concept based on this directive.`;
-  }
-
-  let learningInstruction = "";
-  if (learningContext && learningContext.length > 0) {
-      learningInstruction = `[INTELLIGENT REFINEMENT]: Incorporate: ${learningContext.slice(-3).join('; ')}`;
-  }
-
-  const variedPrompt = injectSynonyms(prompt);
-  const locationContext = locationQuery ? `WORLD: "${locationQuery}". FILTER THROUGH: ${environment}.` : `WORLD: ${envDesc}. TEXTURE: ${randomTexture}.`;
-  
-  let colorContext = colorPalette ? `PALETTE: ${colorPalette}.` : `PALETTE: Signature ${brandInfo.name}.`;
-  if (customHexColors && customHexColors.length > 0) colorContext = `PALETTE: STRICTLY USE [${customHexColors.join(', ')}].`;
-
-  const chaosFactor = Math.random() > 0.4 ? `CONCEPTUAL FILTER: ${bizarrePairing}` : "";
-
-  // LOOKBOOK LOGIC OVERRIDE
+  // --- 3. Construct Prompt ---
   const isLookbook = imageMode === ImageMode.LOOKBOOK;
-  
   let finalEnv = envDesc;
   let finalLight = lightDesc;
 
   if (isLookbook) {
       if (environment === EnvironmentPreset.RANDOM) finalEnv = ENVIRONMENT_DESCRIPTIONS[EnvironmentPreset.NEUTRAL_STUDIO];
       if (lighting === LightingPreset.RANDOM) finalLight = LIGHTING_DESCRIPTIONS[LightingPreset.SOFT_DIFFUSE];
-      // Append clarity instruction
       finalEnv += " Clean, minimal, non-distracting background.";
       finalLight += " Even, bright, commercial lighting.";
   }
 
+  let colorContext = colorPalette ? `PALETTE: ${colorPalette}.` : `PALETTE: Signature ${brandInfo.name}.`;
+  if (customHexColors && customHexColors.length > 0) colorContext = `PALETTE: STRICTLY USE [${customHexColors.join(', ')}].`;
+
   const refinedPrompt = `
+    ${faceInstruction}
+    
     [PHOTOGRAPHIC DIRECTIVE]: Create a ${isLookbook ? 'clean, high-definition FASHION LOOKBOOK' : `hyper-realistic ${isMarketingMockup ? 'marketing campaign' : 'editorial fashion'}`} photograph.
     
     [SETTING] ${finalEnv}. ${!isLookbook ? `Texture: ${randomTexture}. Atmosphere: ${bizarrePairing}.` : ''} ${customScenePrompt || ''}
-    [LIGHTING] ${finalLight}. ${!isLookbook ? `Tone: ${sentiment.toUpperCase()}. ${chaosFactor}` : ''}.
+    [LIGHTING] ${finalLight}. ${!isLookbook ? `Tone: ${getRandom(MODEL_FEATURES.vibes).toUpperCase()}.` : ''}.
     [SUBJECT] ${finalModelDescription}
-    [FASHION] Concept: ${variedPrompt}. Brand: ${brandInfo.name}. ${colorContext}.
-    [TECH] ${isLookbook ? 'Phase One IQ4 150MP. Aperture f/8. Sharp focus on garment details.' : 'Phase One IQ4 150MP. Kodak Portra 400.'}
-    ${referenceAnchorText}
-    ${iterationInstruction}
-    ${learningInstruction}
+    [FASHION] Concept: ${injectSynonyms(prompt)}. Brand: ${brandInfo.name}. ${colorContext}.
+    [TECH] ${isLookbook ? 'Phase One IQ4 150MP. Aperture f/8. Sharp focus.' : 'Phase One IQ4 150MP. Kodak Portra 400.'}
     
-    *** VISUAL MANDATE ***
+    ${iterationMode !== 'NONE' ? `MODE: ${iterationMode}. Refine, Mutate, or Break the concept.` : ''}
+    ${uploadedFiles.length > 0 ? `SOURCE MATERIAL: Use additional images for style guidance only. Fidelity: ${sourceFidelity}%. Interpretation: ${sourceInterpretation || 'VIBE'}.` : ''}
+    ${learningContext.length > 0 ? `[INTELLIGENT REFINEMENT]: ${learningContext.slice(-3).join('; ')}` : ''}
+    
+    *** EXECUTION RULES ***
+    ${referenceModelUrl ? "- PRIORITY: The face must match the Reference Model provided." : ""}
     - PHOTOGRAPHY: Raw 150MP output. ${isLookbook ? 'Commercial clarity.' : ''}
-    - SKIN: EXTREME REALISM. Visible pores, vellus hair, sweat. NO AI SMOOTHING.
-    - IMPERFECTIONS: ${isLookbook ? 'None. Perfect clarity.' : 'Chromatic aberration, film grain.'}
-    ${idPreservationInstruction}
-    ${isLookbook ? '- POSE: Standing, full view of outfit.' : '- LIGHTING: Inverse square law fallout.'}
+    - SKIN: EXTREME REALISM. Visible pores, vellus hair. NO AI SMOOTHING.
   `;
 
   parts.push({ text: refinedPrompt });
@@ -451,7 +579,6 @@ export const generateEditorialImages = async ({
     if (response.candidates?.[0]?.content?.parts) {
       for (const part of response.candidates[0].content.parts) {
         if (part.inlineData && part.inlineData.data) {
-          // OPTIMIZATION: Convert Base64 directly to Blob URL
           const blobUrl = base64ToBlobUrl(part.inlineData.data, part.inlineData.mimeType || 'image/png');
           generatedImages.push(blobUrl);
         }
@@ -464,6 +591,7 @@ export const generateEditorialImages = async ({
   }
 };
 
+// ... keep existing edit, variation, video, etc. functions ...
 export const editGeneratedImage = async (imageUrl: string, editPrompt: string): Promise<string> => {
   const ai = getClient();
   const { base64, mimeType } = await getBase64FromUrl(imageUrl);

@@ -33,7 +33,9 @@ export interface AssetRecord {
   category: AssetCategory;
   brandArchetype?: BrandArchetype;
   aiSummary?: string; // "Prompt: [text] | Seed: [num]"
+  prompt?: string; // Explicit prompt storage for easier retrieval
   notes?: string;
+  rating?: number; // User rating (1-5)
   uploadedAt: any; // ServerTimestamp
 }
 
@@ -48,6 +50,20 @@ export const saveFileMetadata = async (uid: string, fileId: string, data: AssetR
   } catch (error) {
     console.error("Metadata Save Failed:", error);
     throw new Error("Failed to save asset metadata.");
+  }
+};
+
+/**
+ * UPDATE ASSET RATING
+ * Updates the star rating for a specific asset.
+ */
+export const updateAssetRating = async (uid: string, fileId: string, rating: number): Promise<void> => {
+  try {
+    const docRef = doc(db, "users", uid, "files", fileId);
+    await setDoc(docRef, { rating }, { merge: true });
+  } catch (error) {
+    console.error("Rating Update Failed:", error);
+    // Non-blocking error
   }
 };
 
@@ -182,7 +198,9 @@ export const uploadFile = async (
       category,
       brandArchetype: metadata?.brand,
       aiSummary,
+      prompt: metadata?.prompt || "", // Explicit prompt saving
       notes: metadata?.notes || "",
+      rating: 0,
       uploadedAt: serverTimestamp(),
     };
 
@@ -342,7 +360,8 @@ export const deleteFile = async (uid: string, fileId: string): Promise<void> => 
 
 /**
  * FETCH USER ASSETS
- * Retrieves the Digital Archive for a user, filtered by category and sorted by date.
+ * Retrieves the Digital Archive for a user, filtered by category.
+ * SORTS IN MEMORY to avoid Firestore Composite Index requirements.
  */
 export const fetchUserAssets = async (uid: string, category?: AssetCategory): Promise<AssetRecord[]> => {
   try {
@@ -350,21 +369,29 @@ export const fetchUserAssets = async (uid: string, category?: AssetCategory): Pr
     
     let q;
     if (category) {
-      q = query(
-        filesCollection, 
-        where("category", "==", category), 
-        orderBy("uploadedAt", "desc")
-      );
+      // Avoid orderBy here to prevent "Composite Index Required" error
+      // When using inequality/equality filter (where), orderBy usually requires composite index.
+      q = query(filesCollection, where("category", "==", category));
     } else {
+      // Simple sort is fine without where clause
       q = query(filesCollection, orderBy("uploadedAt", "desc"));
     }
 
     const querySnapshot = await getDocs(q);
     
-    return querySnapshot.docs.map(doc => ({
+    const assets = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
     } as AssetRecord));
+
+    // Client-side sort to ensure correct order without Index
+    assets.sort((a, b) => {
+       const dateA = a.uploadedAt?.toMillis ? a.uploadedAt.toMillis() : (a.uploadedAt || 0);
+       const dateB = b.uploadedAt?.toMillis ? b.uploadedAt.toMillis() : (b.uploadedAt || 0);
+       return dateB - dateA; // Descending (Newest first)
+    });
+
+    return assets;
 
   } catch (error) {
     console.error("Error fetching assets:", error);
@@ -376,7 +403,12 @@ export const fetchUserAssets = async (uid: string, category?: AssetCategory): Pr
  * SAVE MODEL TO AGENCY
  * Stores a reference model in a dedicated subcollection.
  */
-export const saveModelToAgency = async (blob: Blob, type: 'UPLOADED' | 'GENERATED'): Promise<SavedModel> => {
+export const saveModelToAgency = async (
+  blob: Blob, 
+  type: 'UPLOADED' | 'GENERATED',
+  name: string = "Unknown Model",
+  biometricData?: string
+): Promise<SavedModel> => {
   if (!auth.currentUser) throw new Error("Not authenticated");
   
   try {
@@ -390,18 +422,25 @@ export const saveModelToAgency = async (blob: Blob, type: 'UPLOADED' | 'GENERATE
 
     // Index in Firestore
     const docRef = doc(db, `users/${auth.currentUser.uid}/models`, modelId);
+    
+    // Clean data to avoid undefined values which Firestore rejects
     const modelData: SavedModel = {
       id: modelId,
       url: downloadURL,
       type: type,
+      name: name,
       timestamp: Date.now()
     };
+
+    if (biometricData) {
+        modelData.biometricData = biometricData;
+    }
     
     await setDoc(docRef, modelData);
     return modelData;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Save Model Failed:", error);
-    throw new Error("Failed to save model to agency.");
+    throw new Error(`Failed to save model to agency: ${error.message}`);
   }
 };
 
